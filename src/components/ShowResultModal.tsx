@@ -2,6 +2,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { X, Star, Users, DollarSign, TrendingUp } from 'lucide-react';
 import { Show } from '../types';
 import { formatCurrency, formatNumber, cn } from '../lib/utils';
+import { showScoreFromRating } from '../lib/promotionPopularity';
 
 interface ShowResultModalProps {
   isOpen: boolean;
@@ -10,6 +11,13 @@ interface ShowResultModalProps {
 }
 
 export default function ShowResultModal({ isOpen, onClose, show }: ShowResultModalProps) {
+  const showScore = showScoreFromRating(show.rating);
+  const expectedScore =
+    show.expectedShowRating !== undefined ? showScoreFromRating(show.expectedShowRating) : null;
+  const popDelta = show.popularityGain;
+  const popLabel =
+    popDelta > 0 ? `+${popDelta}` : popDelta < 0 ? `-${Math.abs(popDelta)}` : '±0';
+
   return (
     <AnimatePresence>
       {isOpen && (
@@ -40,7 +48,12 @@ export default function ShowResultModal({ isOpen, onClose, show }: ShowResultMod
                 </div>
                 <div className="text-right">
                   <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Score</p>
-                  <p className="text-xl font-display text-gold">{Math.round(show.rating * 80)}</p>
+                  <p className="text-xl font-display text-gold">{showScore}</p>
+                  {expectedScore !== null && (
+                    <p className="mt-0.5 text-[9px] font-bold uppercase tracking-wide text-zinc-500">
+                      Expected {expectedScore}
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -67,7 +80,16 @@ export default function ShowResultModal({ isOpen, onClose, show }: ShowResultMod
                 </div>
                 <div className="text-right">
                   <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Popularity</p>
-                  <p className="text-lg font-display text-accent">+{show.popularityGain}</p>
+                  <p
+                    className={cn(
+                      'text-lg font-display tabular-nums',
+                      popDelta > 0 && 'text-green-500',
+                      popDelta < 0 && 'text-accent',
+                      popDelta === 0 && 'text-zinc-400',
+                    )}
+                  >
+                    {popLabel}
+                  </p>
                 </div>
               </div>
 
