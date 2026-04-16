@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Plus, X, Play, Users, AlertCircle } from 'lucide-react';
+import { Plus, X, AlertCircle } from 'lucide-react';
 import { GameState, Match, Fighter, Show } from '../types';
 import { cn } from '../lib/utils';
 
@@ -53,21 +53,51 @@ export default function ShowPlanner({ state, onRunShow, onCancel, calculateMatch
   const isValid = matches.length > 0 && matches.every(m => m.fighterAId && m.fighterBId) && canAfford;
 
   return (
-    <div className="flex flex-col h-full bg-bg">
-      {/* Header */}
-      <div className="p-8 border-b border-border">
-        <div className="flex justify-between items-center">
+    <div className="relative flex min-h-0 flex-1 flex-col bg-bg">
+      <div className="min-h-0 flex-1 overflow-y-auto p-8 pb-4">
+        {/* Header */}
+        <div className="border-b border-border pb-8">
           <h2 className="text-14 font-display uppercase tracking-[2px] text-zinc-500">Show Planner</h2>
-          <button onClick={onCancel} className="text-zinc-500 hover:text-white">
-            <X size={20} />
-          </button>
+          <h3 className="mt-4 text-4xl font-display uppercase leading-none">
+            Next <span className="text-accent">Event</span>
+          </h3>
         </div>
-        <h3 className="text-4xl font-display uppercase leading-none mt-4">
-          Next <span className="text-accent">Event</span>
-        </h3>
-      </div>
 
-      <div className="flex-1 overflow-y-auto p-8 space-y-12">
+        <div className="space-y-12 pt-8">
+        {/* Venue Selection */}
+        <div className="space-y-4">
+          <div className="flex items-center gap-3">
+            <span className="text-[10px] font-display text-gold uppercase tracking-widest">Select Venue</span>
+            <div className="h-px bg-border flex-1" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            {VENUES.map(venue => {
+              const locked = state.popularity < venue.minPopularity;
+              return (
+                <button
+                  key={venue.id}
+                  disabled={locked}
+                  onClick={() => setSelectedVenueId(venue.id)}
+                  className={cn(
+                    "p-4 border text-left transition-all relative overflow-hidden",
+                    selectedVenueId === venue.id ? "border-accent bg-accent/5" : "border-border bg-card hover:border-accent",
+                    locked && "opacity-50 grayscale cursor-not-allowed"
+                  )}
+                >
+                  <p className="text-xs font-display uppercase text-white">{venue.name}</p>
+                  <p className="text-[10px] font-bold text-zinc-500 uppercase mt-1">Cost: {formatCurrency(venue.cost)}</p>
+                  <p className="text-[10px] font-bold text-accent uppercase mt-0.5">{venue.multiplier}x Earnings</p>
+                  {locked && (
+                    <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+                      <span className="text-[8px] font-display uppercase tracking-widest text-white">Pop {venue.minPopularity} Required</span>
+                    </div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         {matches.map((match, idx) => (
           <div key={match.id} className="space-y-6 relative">
             <button 
@@ -132,40 +162,6 @@ export default function ShowPlanner({ state, onRunShow, onCancel, calculateMatch
           </div>
         ))}
 
-        {/* Venue Selection */}
-        <div className="space-y-4">
-          <div className="flex items-center gap-3">
-            <span className="text-[10px] font-display text-gold uppercase tracking-widest">Select Venue</span>
-            <div className="h-px bg-border flex-1" />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            {VENUES.map(venue => {
-              const locked = state.popularity < venue.minPopularity;
-              return (
-                <button
-                  key={venue.id}
-                  disabled={locked}
-                  onClick={() => setSelectedVenueId(venue.id)}
-                  className={cn(
-                    "p-4 border text-left transition-all relative overflow-hidden",
-                    selectedVenueId === venue.id ? "border-accent bg-accent/5" : "border-border bg-card hover:border-accent",
-                    locked && "opacity-50 grayscale cursor-not-allowed"
-                  )}
-                >
-                  <p className="text-xs font-display uppercase text-white">{venue.name}</p>
-                  <p className="text-[10px] font-bold text-zinc-500 uppercase mt-1">Cost: {formatCurrency(venue.cost)}</p>
-                  <p className="text-[10px] font-bold text-accent uppercase mt-0.5">{venue.multiplier}x Earnings</p>
-                  {locked && (
-                    <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
-                      <span className="text-[8px] font-display uppercase tracking-widest text-white">Pop {venue.minPopularity} Required</span>
-                    </div>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
         {matches.length < 3 && (
           <button 
             onClick={addMatch}
@@ -175,16 +171,58 @@ export default function ShowPlanner({ state, onRunShow, onCancel, calculateMatch
             <span className="text-[10px] font-display uppercase tracking-widest">Add Match</span>
           </button>
         )}
+
+        <div className="space-y-6 border-t border-border pt-8">
+          <div className="flex flex-col gap-2">
+            <div className="flex justify-between text-[10px] font-display uppercase tracking-widest text-zinc-500">
+              <span>Matches: {matches.length}/3</span>
+              <span>Venue Cost: {formatCurrency(selectedVenue.cost)}</span>
+            </div>
+            <div className="flex justify-between text-[10px] font-display uppercase tracking-widest text-zinc-500">
+              <span>Match Setup: {formatCurrency(totalSetupCost)}</span>
+              <span>Budget: {formatCurrency(state.money)}</span>
+            </div>
+          </div>
+          {!canAfford && matches.length > 0 && (
+            <p className="text-center text-[10px] font-bold uppercase text-accent animate-pulse">
+              Insufficient Funds for Show
+            </p>
+          )}
+        </div>
+        </div>
       </div>
 
-      {/* Fighter Selection Overlay */}
+      <div className="relative z-30 flex shrink-0 border-t border-border bg-card">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="flex h-20 w-[6.75rem] shrink-0 items-center justify-center border-r border-border px-2 text-center font-display text-[8px] font-bold uppercase leading-snug tracking-wide text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-white sm:w-[7.75rem] sm:text-[9px] sm:tracking-widest"
+        >
+          Back / Cancel
+        </button>
+        <button
+          type="button"
+          disabled={!isValid}
+          onClick={() => onRunShow(matches, selectedVenueId)}
+          className={cn(
+            'min-w-0 flex-1 py-5 font-display text-lg uppercase tracking-tighter transition-all sm:text-xl',
+            isValid
+              ? 'bg-white text-black hover:bg-accent hover:text-white'
+              : 'cursor-not-allowed bg-zinc-800 text-zinc-600'
+          )}
+        >
+          Start Show
+        </button>
+      </div>
+
+      {/* Fighter selection covers planner including action bar */}
       <AnimatePresence>
         {selectingFor && (
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 20 }}
-            className="absolute inset-0 bg-bg z-50 p-8 flex flex-col"
+            className="absolute inset-0 z-50 flex flex-col bg-bg p-8"
           >
             <div className="flex justify-between items-center mb-8">
               <h3 className="text-2xl font-display uppercase text-white">Select <span className="text-accent">Talent</span></h3>
@@ -234,38 +272,6 @@ export default function ShowPlanner({ state, onRunShow, onCancel, calculateMatch
           </motion.div>
         )}
       </AnimatePresence>
-
-      <div className="p-8 bg-card border-t border-border space-y-6">
-        <div className="flex flex-col gap-2">
-          <div className="flex justify-between text-[10px] font-display uppercase tracking-widest text-zinc-500">
-            <span>Matches: {matches.length}/3</span>
-            <span>Venue Cost: {formatCurrency(selectedVenue.cost)}</span>
-          </div>
-          <div className="flex justify-between text-[10px] font-display uppercase tracking-widest text-zinc-500">
-            <span>Match Setup: {formatCurrency(totalSetupCost)}</span>
-            <span>Budget: {formatCurrency(state.money)}</span>
-          </div>
-        </div>
-        
-        {!canAfford && matches.length > 0 && (
-          <p className="text-[10px] font-bold text-accent uppercase text-center animate-pulse">
-            Insufficient Funds for Show
-          </p>
-        )}
-        
-        <button
-          disabled={!isValid}
-          onClick={() => onRunShow(matches, selectedVenueId)}
-          className={cn(
-            "w-full py-6 font-display text-xl uppercase tracking-tighter transition-all",
-            isValid 
-              ? "bg-white text-black hover:bg-accent hover:text-white" 
-              : "bg-zinc-800 text-zinc-600 cursor-not-allowed"
-          )}
-        >
-          Start Show
-        </button>
-      </div>
     </div>
   );
 }

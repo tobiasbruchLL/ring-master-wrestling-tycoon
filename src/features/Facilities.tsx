@@ -1,7 +1,6 @@
-import { motion } from 'motion/react';
-import { Building2, ArrowUpCircle, CheckCircle2, Plus } from 'lucide-react';
+import { ArrowUpCircle } from 'lucide-react';
 import { GameState } from '../types';
-import { cn, formatCurrency } from '../lib/utils';
+import { cn, formatCurrency, getFacilityUpgradeCost } from '../lib/utils';
 
 interface FacilitiesProps {
   state: GameState;
@@ -12,20 +11,15 @@ export default function Facilities({ state, onUpgrade }: FacilitiesProps) {
   return (
     <div className="p-8 space-y-10">
       <section>
-        <h2 className="text-14 font-display uppercase tracking-[2px] text-zinc-500 flex items-center gap-3 after:h-px after:bg-border after:flex-1">
-          Facilities
-        </h2>
-        <div className="mt-4">
-          <h3 className="text-4xl font-display uppercase leading-none">
-            HQ <span className="text-accent">Upgrades</span>
-          </h3>
-          <p className="text-zinc-500 text-xs font-bold uppercase mt-1 tracking-widest">Invest in your promotion</p>
-        </div>
+        <h3 className="text-4xl font-display uppercase leading-none">
+          HQ <span className="text-accent">Upgrades</span>
+        </h3>
+        <p className="text-zinc-500 text-xs font-bold uppercase mt-1 tracking-widest">Invest in your promotion</p>
       </section>
 
       <div className="space-y-0 border-t border-border">
         {state.facilities.map(facility => {
-          const cost = Math.floor(facility.baseCost * Math.pow(2.2, facility.level - 1));
+          const cost = getFacilityUpgradeCost(facility);
           const canAfford = state.money >= cost;
 
           return (

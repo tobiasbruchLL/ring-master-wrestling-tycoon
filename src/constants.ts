@@ -54,28 +54,12 @@ export const STARTING_FIGHTERS: Fighter[] = [
 
 export const AVAILABLE_FACILITIES: Facility[] = [
   {
-    id: 'gym',
-    name: 'Training Gym',
-    level: 1,
-    baseCost: 3000,
-    description: 'Improves fighter strength and stamina training.',
-    effect: '+5% Training Efficiency',
-  },
-  {
-    id: 'arena',
-    name: 'Local Arena',
-    level: 1,
-    baseCost: 8000,
-    description: 'Increases maximum attendance for shows.',
-    effect: '+300 Max Attendance',
-  },
-  {
-    id: 'medical',
-    name: 'Medical Wing',
-    level: 1,
-    baseCost: 5000,
-    description: 'Reduces injury recovery time.',
-    effect: '-1 Day Recovery Time',
+    id: 'performance_center',
+    name: 'Performance Center',
+    level: 0,
+    baseCost: 4200,
+    description: 'Unlocks recruiting and adds one concurrent rookie training slot per level.',
+    effect: '+1 recruit slot per level',
   },
 ];
 

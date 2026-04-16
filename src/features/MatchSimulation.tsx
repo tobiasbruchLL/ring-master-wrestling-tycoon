@@ -1,25 +1,37 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Match, Fighter } from '../types';
+import { Match, Fighter, SimulatedMatchOutcomeDetail } from '../types';
 import { cn } from '../lib/utils';
+import MatchOutcomeModal from '../components/MatchOutcomeModal';
 
 interface MatchSimulationProps {
   matches: Match[];
   roster: Fighter[];
+  perMatchOutcomes: SimulatedMatchOutcomeDetail[];
   onComplete: () => void;
 }
 
-export default function MatchSimulation({ matches, roster, onComplete }: MatchSimulationProps) {
+export default function MatchSimulation({
+  matches,
+  roster,
+  perMatchOutcomes,
+  onComplete,
+}: MatchSimulationProps) {
   const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
   const [phase, setPhase] = useState<'intro' | 'trash-talk' | 'fighting' | 'finish'>('intro');
   const [healthA, setHealthA] = useState(100);
   const [healthB, setHealthB] = useState(100);
   const [isHitting, setIsHitting] = useState<'A' | 'B' | null>(null);
   const [dialogue, setDialogue] = useState<{ side: 'A' | 'B', text: string } | null>(null);
+  const [showOutcome, setShowOutcome] = useState(false);
 
   const currentMatch = matches[currentMatchIndex];
   const fighterA = roster.find(f => f.id === currentMatch.fighterAId)!;
   const fighterB = roster.find(f => f.id === currentMatch.fighterBId)!;
+  const matchOutcome = perMatchOutcomes[currentMatchIndex];
+  const plannedWinnerId = matchOutcome?.match.winnerId;
+  const loserSide: 'A' | 'B' | null =
+    plannedWinnerId === fighterA.id ? 'B' : plannedWinnerId === fighterB.id ? 'A' : null;
 
   const trashTalkLines = {
     Face: [
@@ -66,39 +78,51 @@ export default function MatchSimulation({ matches, roster, onComplete }: MatchSi
 
     if (phase === 'fighting') {
       const interval = setInterval(() => {
-        const attacker = Math.random() > 0.5 ? 'A' : 'B';
-        const damage = Math.floor(Math.random() * 15) + 5;
-        
+        let attacker: 'A' | 'B';
+        if (loserSide && Math.random() < 0.82) {
+          attacker = loserSide === 'A' ? 'B' : 'A';
+        } else {
+          attacker = Math.random() > 0.5 ? 'A' : 'B';
+        }
+
+        const hitsLoser =
+          (loserSide === 'A' && attacker === 'B') || (loserSide === 'B' && attacker === 'A');
+        const damage = Math.floor(Math.random() * 14) + (hitsLoser && loserSide ? 9 : 5);
+
         setIsHitting(attacker);
         setTimeout(() => setIsHitting(null), 100);
 
         if (attacker === 'A') {
-          setHealthB(prev => Math.max(0, prev - damage));
+          setHealthB((prev) => Math.max(0, prev - damage));
         } else {
-          setHealthA(prev => Math.max(0, prev - damage));
+          setHealthA((prev) => Math.max(0, prev - damage));
         }
       }, 600);
 
       return () => clearInterval(interval);
     }
-  }, [phase]);
+  }, [phase, loserSide]);
 
   useEffect(() => {
+    if (phase !== 'fighting') return;
     if (healthA === 0 || healthB === 0) {
       setPhase('finish');
-      const timer = setTimeout(() => {
-        if (currentMatchIndex < matches.length - 1) {
-          setCurrentMatchIndex(prev => prev + 1);
-          setHealthA(100);
-          setHealthB(100);
-          setPhase('intro');
-        } else {
-          onComplete();
-        }
-      }, 2000);
-      return () => clearTimeout(timer);
+      setShowOutcome(true);
     }
-  }, [healthA, healthB, currentMatchIndex, matches.length, onComplete]);
+  }, [healthA, healthB, phase]);
+
+  const handleOutcomeContinue = () => {
+    setShowOutcome(false);
+    if (currentMatchIndex < matches.length - 1) {
+      setCurrentMatchIndex((i) => i + 1);
+      setHealthA(100);
+      setHealthB(100);
+      setPhase('intro');
+      setDialogue(null);
+    } else {
+      onComplete();
+    }
+  };
 
   return (
     <div className="h-full flex flex-col bg-bg relative overflow-hidden">
@@ -244,6 +268,14 @@ export default function MatchSimulation({ matches, roster, onComplete }: MatchSi
           <p className="font-display text-white uppercase">{fighterB.name}</p>
         </div>
       </div>
+
+      <MatchOutcomeModal
+        isOpen={showOutcome}
+        outcome={matchOutcome ?? null}
+        matchNumber={currentMatchIndex + 1}
+        matchTotal={matches.length}
+        onContinue={handleOutcomeContinue}
+      />
     </div>
   );
 }

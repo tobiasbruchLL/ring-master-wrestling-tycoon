@@ -1,8 +1,9 @@
-import { useState, ReactNode } from 'react';
+import { useState, useEffect, ReactNode } from 'react';
 import { motion } from 'motion/react';
-import { Plus, Trash2, Zap, Star, Shield, Brain, Users } from 'lucide-react';
+import { Trash2, Users } from 'lucide-react';
 import { GameState, Fighter } from '../types';
 import { cn, formatCurrency } from '../lib/utils';
+import WrestlerDetailModal from '../components/WrestlerDetailModal';
 
 interface RosterProps {
   state: GameState;
@@ -14,42 +15,42 @@ interface RosterProps {
 export default function Roster({ state, onHire, onFire, generateFighter }: RosterProps) {
   const [tab, setTab] = useState<'current' | 'hire'>('current');
   const [candidates] = useState<Fighter[]>(() => Array.from({ length: 3 }, generateFighter));
+  const [detailFighter, setDetailFighter] = useState<Fighter | null>(null);
+
+  useEffect(() => {
+    setDetailFighter(null);
+  }, [tab]);
+
+  useEffect(() => {
+    setDetailFighter((prev) => {
+      if (!prev) return prev;
+      const onRoster = state.roster.some((f) => f.id === prev.id);
+      if (!onRoster) return prev;
+      const fresh = state.roster.find((f) => f.id === prev.id);
+      return fresh ?? null;
+    });
+  }, [state.roster]);
 
   return (
-    <div className="flex flex-col h-full bg-bg">
-      {/* Tabs */}
-      <div className="flex p-6 gap-px bg-border border-b border-border">
-        <button 
-          onClick={() => setTab('current')}
-          className={cn(
-            "flex-1 py-3 font-display uppercase text-xs tracking-widest transition-all",
-            tab === 'current' ? "bg-accent text-white" : "bg-card text-zinc-500"
-          )}
-        >
-          Roster ({state.roster.length})
-        </button>
-        <button 
-          onClick={() => setTab('hire')}
-          className={cn(
-            "flex-1 py-3 font-display uppercase text-xs tracking-widest transition-all",
-            tab === 'hire' ? "bg-accent text-white" : "bg-card text-zinc-500"
-          )}
-        >
-          Hire Talent
-        </button>
-      </div>
-
-      <div className="flex-1 overflow-y-auto p-6 space-y-4">
+    <div className="flex min-h-0 flex-1 flex-col bg-bg">
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-6">
         {tab === 'current' ? (
           state.roster.length > 0 ? (
             state.roster.map(fighter => (
               <FighterCard 
                 key={fighter.id} 
-                fighter={fighter} 
+                fighter={fighter}
+                onSelect={() => setDetailFighter(fighter)}
                 action={
                   <button 
-                    onClick={() => onFire(fighter.id)}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (detailFighter?.id === fighter.id) setDetailFighter(null);
+                      onFire(fighter.id);
+                    }}
                     className="p-2 text-zinc-600 hover:text-accent transition-colors"
+                    aria-label={`Release ${fighter.name}`}
                   >
                     <Trash2 size={18} />
                   </button>
@@ -66,10 +67,16 @@ export default function Roster({ state, onHire, onFire, generateFighter }: Roste
           candidates.map(fighter => (
             <FighterCard 
               key={fighter.id} 
-              fighter={fighter} 
+              fighter={fighter}
+              onSelect={() => setDetailFighter(fighter)}
               action={
                 <button 
-                  onClick={() => onHire(fighter)}
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (detailFighter?.id === fighter.id) setDetailFighter(null);
+                    onHire(fighter);
+                  }}
                   disabled={state.money < fighter.signingBonus || state.roster.some(f => f.id === fighter.id)}
                   className={cn(
                     "px-4 py-2 font-display uppercase text-[10px] tracking-tighter transition-all",
@@ -85,6 +92,35 @@ export default function Roster({ state, onHire, onFire, generateFighter }: Roste
           ))
         )}
       </div>
+
+      <div className="flex shrink-0 gap-px border-t border-border bg-border p-6">
+        <button
+          type="button"
+          onClick={() => setTab('current')}
+          className={cn(
+            'flex-1 py-3 font-display text-xs uppercase tracking-widest transition-all',
+            tab === 'current' ? 'bg-accent text-white' : 'bg-card text-zinc-500',
+          )}
+        >
+          Roster ({state.roster.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab('hire')}
+          className={cn(
+            'flex-1 py-3 font-display text-xs uppercase tracking-widest transition-all',
+            tab === 'hire' ? 'bg-accent text-white' : 'bg-card text-zinc-500',
+          )}
+        >
+          Hire Talent
+        </button>
+      </div>
+
+      <WrestlerDetailModal
+        isOpen={detailFighter !== null}
+        fighter={detailFighter}
+        onClose={() => setDetailFighter(null)}
+      />
     </div>
   );
 }
@@ -92,33 +128,30 @@ export default function Roster({ state, onHire, onFire, generateFighter }: Roste
 interface FighterCardProps {
   fighter: Fighter;
   action: ReactNode;
+  onSelect?: () => void;
   key?: string | number;
 }
 
-function FighterCard({ fighter, action }: FighterCardProps) {
-  return (
-    <motion.div 
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="bg-card border border-border p-4 flex gap-4 items-center"
-    >
-      <div className="relative shrink-0">
+function FighterCard({ fighter, action, onSelect }: FighterCardProps) {
+  const ovr = Math.round(
+    (fighter.stats.strength + fighter.stats.charisma + fighter.stats.skill + fighter.stats.stamina) / 4,
+  );
+  const body = (
+    <>
+      <div className="shrink-0">
         <img 
           src={fighter.image} 
           alt={fighter.name} 
           className="w-16 h-16 rounded-none object-contain border border-border"
           referrerPolicy="no-referrer"
         />
-        <div className="absolute -bottom-1 -right-1 bg-gold text-black text-[10px] font-display px-1.5">
-          {fighter.popularity}
-        </div>
       </div>
 
       <div className="flex-1 min-w-0">
-        <div className="flex justify-between items-start">
+        <div className="flex justify-between items-start gap-2">
           <h4 className="font-display text-white uppercase text-lg leading-tight truncate">{fighter.name}</h4>
           <span className={cn(
-            "text-[8px] font-display uppercase tracking-widest px-1.5 py-0.5 border",
+            "text-[8px] font-display uppercase tracking-widest px-1.5 py-0.5 border shrink-0",
             fighter.alignment === 'Face' ? "text-blue-400 border-blue-400/30" : "text-accent border-accent/30"
           )}>
             {fighter.alignment}
@@ -126,8 +159,9 @@ function FighterCard({ fighter, action }: FighterCardProps) {
         </div>
         <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mt-0.5">{fighter.trait}</p>
         
-          <div className="flex justify-between text-[10px] font-bold text-zinc-500 uppercase mt-2">
-            <span>OVR {Math.round((fighter.stats.strength + fighter.stats.charisma + fighter.stats.skill + fighter.stats.stamina) / 4)}</span>
+          <div className="flex flex-wrap justify-between gap-x-2 gap-y-1 text-[10px] font-bold text-zinc-500 uppercase mt-2">
+            <span>RATING {ovr}</span>
+            <span>POPULARITY {fighter.popularity}</span>
             <span className="text-accent">Energy {fighter.energy}%</span>
           </div>
         
@@ -139,17 +173,32 @@ function FighterCard({ fighter, action }: FighterCardProps) {
           />
         </div>
       </div>
-
-      <div>{action}</div>
-    </motion.div>
+    </>
   );
-}
 
-function StatMini({ icon, value, color }: { icon: ReactNode, value: number, color: string }) {
   return (
-    <div className="flex items-center gap-1">
-      <span className={color}>{icon}</span>
-      <span className="text-[10px] font-mono font-bold text-zinc-400">{value}</span>
-    </div>
+    <motion.div 
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="bg-card border border-border p-4 flex gap-4 items-center"
+    >
+      {onSelect ? (
+        <button
+          type="button"
+          onClick={onSelect}
+          className="flex flex-1 min-w-0 gap-4 items-center text-left hover:bg-white/[0.04] active:bg-white/[0.07] -m-4 p-4 mr-0 transition-colors"
+        >
+          {body}
+        </button>
+      ) : (
+        <div className="flex flex-1 min-w-0 gap-4 items-center">
+          {body}
+        </div>
+      )}
+
+      <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
+        {action}
+      </div>
+    </motion.div>
   );
 }
