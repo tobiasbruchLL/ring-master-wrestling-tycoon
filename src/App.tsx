@@ -16,6 +16,7 @@ import SettingsMenu from './components/SettingsMenu';
 import DebugMenu from './components/DebugMenu';
 import ShowResultModal from './components/ShowResultModal';
 import RecruitTrainingModal from './components/RecruitTrainingModal';
+import { useToastStack } from './components/ToastStack';
 import { Match, ShowSimulationResult, hasPendingRecruitTraining, getRecruitSlotCap } from './types';
 
 type View = 'dashboard' | 'roster' | 'facilities' | 'recruiting' | 'planner' | 'simulating';
@@ -39,6 +40,8 @@ export default function App() {
     endDay,
   } = useGameState();
 
+  const { enqueueMessage, enqueueInjuryRecoveries, stack: toastStack } = useToastStack();
+
   const recruitCap = getRecruitSlotCap(state);
   const pendingTrainingRecruits = state.activeRecruits.filter((r) => r.needsTrainingChoice);
   const popularityBar = getPromotionPopularityBar(state.popularity);
@@ -48,14 +51,12 @@ export default function App() {
   const [isDebugOpen, setIsDebugOpen] = useState(false);
   const [showResult, setShowResult] = useState<boolean>(false);
   const [recruitTrainingOpen, setRecruitTrainingOpen] = useState(false);
-  const [tapCount, setTapCount] = useState(0);
   const [pendingMatches, setPendingMatches] = useState<Match[]>([]);
   const [pendingShowSimulation, setPendingShowSimulation] = useState<ShowSimulationResult | null>(null);
   const bootstrappedTrainingRef = useRef(false);
   const prevShowResultOpenRef = useRef(showResult);
-  const toastDismissTimerRef = useRef<number | null>(null);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
-
+  const debugTapCountRef = useRef(0);
+  const debugTapResetTimerRef = useRef<number | null>(null);
   useEffect(() => {
     if (bootstrappedTrainingRef.current) return;
     bootstrappedTrainingRef.current = true;
@@ -77,8 +78,8 @@ export default function App() {
 
   useEffect(() => {
     return () => {
-      if (toastDismissTimerRef.current !== null) {
-        window.clearTimeout(toastDismissTimerRef.current);
+      if (debugTapResetTimerRef.current !== null) {
+        window.clearTimeout(debugTapResetTimerRef.current);
       }
     };
   }, []);
@@ -87,14 +88,7 @@ export default function App() {
   const mustRunShowBeforeEndDay = isPlannedShowRunnableNow(state);
 
   const showToast = (message: string) => {
-    if (toastDismissTimerRef.current !== null) {
-      window.clearTimeout(toastDismissTimerRef.current);
-    }
-    setToastMessage(message);
-    toastDismissTimerRef.current = window.setTimeout(() => {
-      setToastMessage(null);
-      toastDismissTimerRef.current = null;
-    }, 3600);
+    enqueueMessage(message);
   };
 
   const openPlanner = () => {
@@ -122,16 +116,28 @@ export default function App() {
     if (result.ok === false) {
       if (hasPendingRecruitTraining(state)) setRecruitTrainingOpen(true);
       showToast(result.reason);
+    } else {
+      enqueueInjuryRecoveries(result.injuryRecoveries);
+      showToast('All Fighters restore some energy');
     }
   };
 
-  // Debug menu trigger
   const handleDebugTap = () => {
-    setTapCount(prev => prev + 1);
-    setTimeout(() => setTapCount(0), 2000);
-    if (tapCount >= 9) {
+    if (debugTapResetTimerRef.current !== null) {
+      window.clearTimeout(debugTapResetTimerRef.current);
+    }
+    debugTapCountRef.current += 1;
+    debugTapResetTimerRef.current = window.setTimeout(() => {
+      debugTapCountRef.current = 0;
+      debugTapResetTimerRef.current = null;
+    }, 2000);
+    if (debugTapCountRef.current >= 10) {
       setIsDebugOpen(true);
-      setTapCount(0);
+      debugTapCountRef.current = 0;
+      if (debugTapResetTimerRef.current !== null) {
+        window.clearTimeout(debugTapResetTimerRef.current);
+        debugTapResetTimerRef.current = null;
+      }
     }
   };
 
@@ -177,10 +183,13 @@ export default function App() {
             roster={state.roster}
             perMatchOutcomes={pendingShowSimulation.perMatchOutcomes}
             onComplete={() => {
-              commitSimulatedShow(pendingShowSimulation);
+              const sim = pendingShowSimulation;
+              commitSimulatedShow(sim);
+              enqueueInjuryRecoveries(sim.injuryRecoveries);
               setPendingShowSimulation(null);
               setCurrentView('dashboard');
               setShowResult(true);
+              showToast('All Fighters restore some energy');
             }}
           />
         ) : null;
@@ -200,16 +209,23 @@ export default function App() {
     <div className="min-h-screen bg-[#050505] text-white font-sans selection:bg-accent selection:text-white flex justify-center">
       {/* Mobile-style Portrait Container */}
       <div className="relative flex h-dvh max-h-dvh min-h-0 w-full max-w-md flex-col overflow-hidden border-x border-border bg-bg shadow-2xl">
-        
-        {/* Header */}
-        <header
-          className="sticky top-0 z-40 flex items-center gap-2 border-b-2 border-accent bg-bg px-3 py-2"
+        {/* Full-width secret debug hit target above modals; leaves room for settings */}
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-hidden
           onClick={handleDebugTap}
-        >
-          <div
-            className="flex min-w-0 flex-1 items-center gap-5"
-            onClick={(e) => e.stopPropagation()}
-          >
+          className={cn(
+            'absolute left-0 top-0 z-[250] box-border border-0 bg-transparent p-0',
+            'w-[calc(100%-3.25rem)] pt-[env(safe-area-inset-top,0px)]',
+            'min-h-[calc(3.25rem+env(safe-area-inset-top,0px))]',
+            isDebugOpen && 'pointer-events-none',
+          )}
+        />
+
+        {/* Header */}
+        <header className="sticky top-0 z-40 flex items-center gap-2 border-b-2 border-accent bg-bg px-3 py-2 pt-[max(0.5rem,env(safe-area-inset-top))]">
+          <div className="flex min-w-0 flex-1 items-center gap-5">
             <div
               className="flex min-w-0 flex-1 flex-col gap-0.5"
               title={`Progress toward popularity ${popularityBar.segmentHigh}`}
@@ -248,9 +264,9 @@ export default function App() {
               currentView === 'roster' ||
               currentView === 'recruiting'
               ? 'flex min-h-0 flex-col overflow-hidden'
-              : 'overflow-y-auto pb-24',
-            currentView === 'dashboard' && 'pb-32',
-            (currentView === 'roster' || currentView === 'recruiting') && 'pb-24',
+              : 'overflow-y-auto pb-20',
+            currentView === 'dashboard' && 'pb-28',
+            (currentView === 'roster' || currentView === 'recruiting') && 'pb-20',
           )}
         >
           <AnimatePresence mode="wait">
@@ -275,7 +291,7 @@ export default function App() {
         </main>
 
         {currentView === 'dashboard' && (
-          <div className="pointer-events-none absolute bottom-20 left-0 right-0 z-30 px-4 pb-3">
+          <div className="pointer-events-none absolute bottom-16 left-0 right-0 z-30 px-4 pb-3">
             <button
               type="button"
               disabled={mustRunShowBeforeEndDay}
@@ -300,14 +316,14 @@ export default function App() {
         {/* Bottom Navigation */}
         <nav
           className={cn(
-            'absolute bottom-0 left-0 right-0 z-40 flex h-20 items-center justify-around border-t border-border bg-card px-2',
+            'absolute bottom-0 left-0 right-0 z-40 flex h-16 items-center justify-around border-t border-border bg-card px-2',
             (currentView === 'planner' || currentView === 'simulating') && 'hidden'
           )}
         >
           <NavButton
             active={currentView === 'roster'}
             onClick={() => setCurrentView('roster')}
-            icon={<Users size={20} />}
+            icon={<Users size={18} />}
             label="Roster"
           />
           <NavButton
@@ -320,19 +336,19 @@ export default function App() {
               }
               setCurrentView('recruiting');
             }}
-            icon={<UserPlus size={20} />}
+            icon={<UserPlus size={18} />}
             label="Recruit"
           />
           <NavButton
             active={currentView === 'dashboard'}
             onClick={() => setCurrentView('dashboard')}
-            icon={<Trophy size={20} />}
+            icon={<Trophy size={18} />}
             label="Home"
           />
           <NavButton 
             active={currentView === 'facilities'} 
             onClick={() => setCurrentView('facilities')} 
-            icon={<Building2 size={20} />} 
+            icon={<Building2 size={18} />} 
             label="Upgrades" 
           />
         </nav>
@@ -359,21 +375,7 @@ export default function App() {
           onSubmit={(choices) => submitRecruitTrainingChoices(choices)}
         />
 
-        <AnimatePresence>
-          {toastMessage && (
-            <motion.div
-              role="status"
-              aria-live="polite"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 6 }}
-              transition={{ duration: 0.2 }}
-              className="pointer-events-none absolute bottom-24 left-4 right-4 z-50 rounded-xl border border-border bg-card px-4 py-3 text-center text-xs font-bold uppercase leading-snug tracking-wide text-zinc-200 shadow-lg"
-            >
-              {toastMessage}
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {toastStack}
       </div>
     </div>
   );
@@ -398,7 +400,7 @@ function NavButton({
       onClick={onClick}
       aria-disabled={locked ? true : undefined}
       className={cn(
-        'flex flex-col items-center gap-1 px-4 py-2 rounded-xl transition-all',
+        'flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl transition-all',
         locked
           ? 'cursor-not-allowed text-zinc-600 opacity-50'
           : active

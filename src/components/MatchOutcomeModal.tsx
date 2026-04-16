@@ -56,6 +56,9 @@ function FighterOutcomeCard({
       <div className="space-y-1.5 border-t border-border pt-3">
         <DeltaRow label="Popularity" value={delta.popularity} />
         <DeltaRow label="Energy" value={delta.energy} invert />
+        {delta.injurySustained && (
+          <p className="text-[9px] font-bold uppercase tracking-widest text-accent">Injury — sidelined until fully rested</p>
+        )}
       </div>
     </div>
   );

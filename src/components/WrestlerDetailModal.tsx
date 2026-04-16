@@ -2,7 +2,7 @@ import { Fragment, type ReactNode } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Dumbbell, Mic2, HeartPulse, Crosshair, AlertTriangle } from 'lucide-react';
 import { Fighter, FighterTrait, FighterStats } from '../types';
-import { cn } from '../lib/utils';
+import { cn, fighterPower } from '../lib/utils';
 
 interface WrestlerDetailModalProps {
   isOpen: boolean;
@@ -16,10 +16,6 @@ const TRAIT_FOCUS: Record<FighterTrait, keyof FighterStats> = {
   'High Flyer': 'skill',
   Powerhouse: 'strength',
 };
-
-function overallRating(stats: FighterStats) {
-  return Math.round((stats.strength + stats.charisma + stats.skill + stats.stamina) / 4);
-}
 
 function StatRow({
   label,
@@ -57,9 +53,9 @@ function StatRow({
 }
 
 function WrestlerDetailBody({ fighter, onClose }: { fighter: Fighter; onClose: () => void }) {
-  const ovr = overallRating(fighter.stats);
+  const ovr = fighterPower(fighter.stats);
   const focusKey = TRAIT_FOCUS[fighter.trait];
-  const injured = fighter.injuryDays > 0;
+  const recovering = fighter.recoveringFromInjury;
 
   return (
     <>
@@ -113,7 +109,7 @@ function WrestlerDetailBody({ fighter, onClose }: { fighter: Fighter; onClose: (
                   </div>
                   <div className="grid grid-cols-3 gap-2">
                     <div className="bg-card border border-border p-2">
-                      <p className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest">RATING</p>
+                      <p className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest">POWER</p>
                       <p className="text-2xl font-display text-white leading-none">{ovr}</p>
                     </div>
                     <div className="bg-card border border-border p-2">
@@ -128,13 +124,13 @@ function WrestlerDetailBody({ fighter, onClose }: { fighter: Fighter; onClose: (
                 </div>
               </div>
 
-              {injured && (
+              {recovering && (
                 <div className="flex gap-3 items-start bg-accent/10 border border-accent/40 p-3">
                   <AlertTriangle className="text-accent shrink-0 mt-0.5" size={18} />
                   <div>
-                    <p className="text-xs font-display uppercase tracking-wide text-accent">Injured</p>
+                    <p className="text-xs font-display uppercase tracking-wide text-accent">Recovering</p>
                     <p className="text-[11px] text-zinc-400 mt-0.5">
-                      {fighter.injuryDays} day{fighter.injuryDays === 1 ? '' : 's'} remaining before cleared to compete.
+                      Cannot be booked until energy is back at 100%. Regains double energy each day while recovering.
                     </p>
                   </div>
                 </div>
@@ -184,7 +180,8 @@ function WrestlerDetailBody({ fighter, onClose }: { fighter: Fighter; onClose: (
                   <div className="h-full bg-accent transition-all" style={{ width: `${fighter.energy}%` }} />
                 </div>
                 <p className="text-[11px] text-zinc-500">
-                  High energy improves match quality; schedule rest between demanding shows.
+                  Low energy increases injury risk in matches. After a show, everyone gets a small daily energy bump
+                  when the calendar advances.
                 </p>
               </div>
             </div>

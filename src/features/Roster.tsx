@@ -2,7 +2,7 @@ import { useState, useEffect, ReactNode } from 'react';
 import { motion } from 'motion/react';
 import { Trash2, Users } from 'lucide-react';
 import { GameState, Fighter } from '../types';
-import { cn, formatCurrency } from '../lib/utils';
+import { cn, formatCurrency, fighterPower } from '../lib/utils';
 import WrestlerDetailModal from '../components/WrestlerDetailModal';
 
 interface RosterProps {
@@ -133,9 +133,8 @@ interface FighterCardProps {
 }
 
 function FighterCard({ fighter, action, onSelect }: FighterCardProps) {
-  const ovr = Math.round(
-    (fighter.stats.strength + fighter.stats.charisma + fighter.stats.skill + fighter.stats.stamina) / 4,
-  );
+  const ovr = fighterPower(fighter.stats);
+  const recovering = fighter.recoveringFromInjury;
   const body = (
     <>
       <div className="shrink-0">
@@ -160,9 +159,12 @@ function FighterCard({ fighter, action, onSelect }: FighterCardProps) {
         <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mt-0.5">{fighter.trait}</p>
         
           <div className="flex flex-wrap justify-between gap-x-2 gap-y-1 text-[10px] font-bold text-zinc-500 uppercase mt-2">
-            <span>RATING {ovr}</span>
+            <span>POWER {ovr}</span>
             <span>POPULARITY {fighter.popularity}</span>
-            <span className="text-accent">Energy {fighter.energy}%</span>
+            <span className="tabular-nums text-accent">
+              Energy {fighter.energy}%
+              {recovering && <span className="ml-1 text-[8px] font-bold text-zinc-400">(recovery)</span>}
+            </span>
           </div>
         
         {/* Skill Bar */}

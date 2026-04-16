@@ -18,6 +18,7 @@ import {
   ShowSimulationResult,
   SimulatedMatchOutcomeDetail,
   FighterBookingDelta,
+  InjuryRecoveryNotice,
 } from '../types';
 import {
   INITIAL_MONEY,
@@ -39,6 +40,7 @@ import { computePromotionPopularityDelta } from '../lib/promotionPopularity';
 import { computeShowPrepDays } from '../lib/showScheduling';
 import { computeMatchScoreBreakdown } from '../lib/matchScoring';
 import { computeNightTicketSale } from '../lib/showEconomy';
+import { rollShowFightEnergyCost, showFightInjuryChance } from '../lib/fighterShow';
 
 const STORAGE_KEY = 'ring_master_save';
 
@@ -61,6 +63,45 @@ function createFreshGameState(): GameState {
     recruitProspects: [],
     activeRecruits: [],
   };
+}
+
+function normalizeFighter(f: Fighter): Fighter {
+  const legacy = f as Fighter & { recoveringFromInjury?: boolean };
+  const recovering =
+    typeof legacy.recoveringFromInjury === 'boolean'
+      ? legacy.recoveringFromInjury
+      : typeof legacy.injuryDays === 'number' && legacy.injuryDays > 0;
+  return {
+    ...f,
+    recoveringFromInjury: recovering,
+    injuryDays: 0,
+  };
+}
+
+function findClearedInjuryRecoveries(beforeRoster: Fighter[], afterRoster: Fighter[]): InjuryRecoveryNotice[] {
+  const afterById = new Map(afterRoster.map((f) => [f.id, f]));
+  const out: InjuryRecoveryNotice[] = [];
+  for (const before of beforeRoster) {
+    const after = afterById.get(before.id);
+    if (after && before.recoveringFromInjury && !after.recoveringFromInjury) {
+      out.push({ fighterId: after.id, name: after.name });
+    }
+  }
+  return out;
+}
+
+/** +5 energy per day, or +10 while recovering; clears recovery at 100 energy. */
+function applyDayStartEnergyToRoster(roster: Fighter[]): Fighter[] {
+  return roster.map((f) => {
+    const gain = f.recoveringFromInjury ? 10 : 5;
+    const nextEnergy = Math.min(100, f.energy + gain);
+    const clearedRecovery = f.recoveringFromInjury && nextEnergy >= 100;
+    return {
+      ...f,
+      energy: clearedRecovery ? 100 : nextEnergy,
+      recoveringFromInjury: clearedRecovery ? false : f.recoveringFromInjury,
+    };
+  });
 }
 
 function normalizeActiveRecruits(raw: unknown): ActiveRecruit[] {
@@ -122,7 +163,9 @@ function normalizeLoadedState(raw: unknown): GameState {
   return {
     money: typeof r.money === 'number' ? r.money : INITIAL_MONEY,
     popularity: typeof r.popularity === 'number' ? r.popularity : INITIAL_POPULARITY,
-    roster: Array.isArray(r.roster) ? (r.roster as Fighter[]) : STARTING_FIGHTERS,
+    roster: Array.isArray(r.roster)
+      ? (r.roster as Fighter[]).map(normalizeFighter)
+      : STARTING_FIGHTERS,
     facilities,
     activeMarketing: Array.isArray(r.activeMarketing) ? (r.activeMarketing as MarketingCampaign[]) : [],
     history: Array.isArray(r.history) ? (r.history as Show[]) : [],
@@ -228,21 +271,38 @@ function computeShowSimulation(
 
   const activeRecruits = prev.activeRecruits.filter((r) => r.daysTrained < TRAINING_DAYS_TOTAL);
 
+  type FightAftermath = { energyCost: number; injurySustained: boolean };
+  const aftermathById = new Map<string, FightAftermath>();
+
+  for (const m of simulatedMatches) {
+    const fa = roster.find((x) => x.id === m.fighterAId)!;
+    const fb = roster.find((x) => x.id === m.fighterBId)!;
+    const wId = m.winnerId!;
+    for (const fighter of [fa, fb]) {
+      const won = wId === fighter.id;
+      const energyCost = rollShowFightEnergyCost(won);
+      const injurySustained = Math.random() < showFightInjuryChance(fighter.energy);
+      aftermathById.set(fighter.id, { energyCost, injurySustained });
+    }
+  }
+
   const updatedRoster = prev.roster.map((f) => {
-    const wasInShow = matches.some((m) => m.fighterAId === f.id || m.fighterBId === f.id);
-    if (wasInShow) {
+    const aftermath = aftermathById.get(f.id);
+    if (aftermath) {
       return {
         ...f,
-        energy: Math.max(0, f.energy - 20),
+        energy: Math.max(0, f.energy - aftermath.energyCost),
+        recoveringFromInjury: f.recoveringFromInjury || aftermath.injurySustained,
         popularity: f.popularity + (showRating > 3 ? 2 : 1),
       };
     }
-    return { ...f, energy: Math.min(100, f.energy + 10) };
+    return { ...f };
   });
 
   const fighterDelta = (before: Fighter, after: Fighter): FighterBookingDelta => ({
     energy: after.energy - before.energy,
     popularity: after.popularity - before.popularity,
+    injurySustained: !before.recoveringFromInjury && after.recoveringFromInjury ? true : undefined,
   });
 
   const perMatchOutcomes: SimulatedMatchOutcomeDetail[] = simulatedMatches.map((m) => {
@@ -273,11 +333,14 @@ function computeShowSimulation(
 
   const mergedAfterShow: GameState = { ...prev, ...showPatch };
   const turnover = computeDayTurnover(mergedAfterShow);
+  const injuryRecoveries = findClearedInjuryRecoveries(mergedAfterShow.roster, turnover.roster);
 
   return {
     perMatchOutcomes,
+    injuryRecoveries,
     patch: {
       ...showPatch,
+      roster: turnover.roster,
       currentDay: turnover.currentDay,
       activeRecruits: turnover.activeRecruits,
       recruitProspects: turnover.recruitProspects,
@@ -417,6 +480,7 @@ function applyTrainingSession(
       alignment: next.alignment,
       trait: next.trait,
       injuryDays: 0,
+      recoveringFromInjury: false,
       image: next.image,
     };
   }
@@ -500,6 +564,11 @@ export function getPlannedShowRunBlockReason(state: GameState): string | null {
   for (const m of plan.matches) {
     if (!m.fighterAId || !m.fighterBId) return 'Card is incomplete.';
     if (!rosterIds.has(m.fighterAId) || !rosterIds.has(m.fighterBId)) return 'A wrestler on the card is no longer on the roster.';
+    const a = state.roster.find((f) => f.id === m.fighterAId);
+    const b = state.roster.find((f) => f.id === m.fighterBId);
+    if (a?.recoveringFromInjury || b?.recoveringFromInjury) {
+      return 'A wrestler on the card is recovering from an injury and cannot compete yet.';
+    }
   }
 
   const setup = setupCostForMatches(plan.matches);
@@ -518,7 +587,7 @@ export function isPlannedShowRunnableNow(state: GameState): boolean {
 
 function computeDayTurnover(
   prev: GameState,
-): Pick<GameState, 'currentDay' | 'activeRecruits' | 'recruitProspects' | 'upcomingShow'> & {
+): Pick<GameState, 'currentDay' | 'activeRecruits' | 'recruitProspects' | 'upcomingShow' | 'roster'> & {
   moneyDelta: number;
 } {
   let moneyDelta = 0;
@@ -561,6 +630,7 @@ function computeDayTurnover(
     recruitProspects,
     moneyDelta,
     upcomingShow: nextUpcoming,
+    roster: applyDayStartEnergyToRoster(prev.roster),
   };
 }
 
@@ -607,6 +677,7 @@ export function useGameState() {
       alignment: ALIGNMENTS[Math.floor(Math.random() * ALIGNMENTS.length)] as FighterAlignment,
       trait: TRAITS[Math.floor(Math.random() * TRAITS.length)] as FighterTrait,
       injuryDays: 0,
+      recoveringFromInjury: false,
       image: '/wrestler.png',
     };
   }, []);
@@ -724,6 +795,11 @@ export function useGameState() {
   const scheduleUpcomingShow = (matches: Match[], venueId: string) => {
     setState((prev) => {
       if (prev.upcomingShow) return prev;
+      for (const m of matches) {
+        const a = prev.roster.find((f) => f.id === m.fighterAId);
+        const b = prev.roster.find((f) => f.id === m.fighterBId);
+        if (a?.recoveringFromInjury || b?.recoveringFromInjury) return prev;
+      }
       const prepDays = computeShowPrepDays(matches.length, venueId);
       const planned: GameState['upcomingShow'] = {
         matches: matches.map((m) => ({ ...m })),
@@ -738,15 +814,19 @@ export function useGameState() {
     });
   };
 
-  const endDay = (): { ok: true } | { ok: false; reason: string } => {
+  const endDay = ():
+    | { ok: true; injuryRecoveries: InjuryRecoveryNotice[] }
+    | { ok: false; reason: string } => {
     if (hasPendingRecruitTraining(state)) {
       return { ok: false, reason: 'Finish rookie training before ending the day.' };
     }
     if (isPlannedShowRunnableNow(state)) {
       return { ok: false, reason: 'Run the booked show before ending the day.' };
     }
+    let injuryRecoveries: InjuryRecoveryNotice[] = [];
     setState((prev) => {
       const t = computeDayTurnover(prev);
+      injuryRecoveries = findClearedInjuryRecoveries(prev.roster, t.roster);
       return {
         ...prev,
         currentDay: t.currentDay,
@@ -754,9 +834,10 @@ export function useGameState() {
         recruitProspects: t.recruitProspects,
         upcomingShow: t.upcomingShow,
         money: prev.money + t.moneyDelta,
+        roster: t.roster,
       };
     });
-    return { ok: true };
+    return { ok: true, injuryRecoveries };
   };
 
   const resetGame = () => {

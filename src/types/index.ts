@@ -18,7 +18,10 @@ export type Fighter = {
   energy: number; // 0-100
   alignment: FighterAlignment;
   trait: FighterTrait;
+  /** Legacy saves only; recovery is energy-based via `recoveringFromInjury`. */
   injuryDays: number;
+  /** When true, cannot be booked; gains +10 energy per day until energy reaches 100. */
+  recoveringFromInjury: boolean;
   image: string;
 };
 
@@ -157,6 +160,8 @@ export type GameState = {
 export type FighterBookingDelta = {
   energy: number;
   popularity: number;
+  /** Set when a random injury from low energy / match wear triggered recovery. */
+  injurySustained?: boolean;
 };
 
 export type SimulatedMatchOutcomeDetail = {
@@ -167,9 +172,17 @@ export type SimulatedMatchOutcomeDetail = {
   deltaB: FighterBookingDelta;
 };
 
+/** Wrestlers who cleared injury recovery when day turnover ran after this update. */
+export type InjuryRecoveryNotice = {
+  fighterId: string;
+  name: string;
+};
+
 /** Precomputed show: UI per-match breakdown plus state patch for commit after simulation. */
 export type ShowSimulationResult = {
   perMatchOutcomes: SimulatedMatchOutcomeDetail[];
+  /** Fighters who finished injury recovery when the post-show day tick applied. */
+  injuryRecoveries: InjuryRecoveryNotice[];
   patch: Pick<
     GameState,
     | 'money'
