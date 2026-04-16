@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Ring Master - Wrestling Tycoon</string>
+    <string name="title_activity_main">Ring Master - Wrestling Tycoon</string>
+    <string name="package_name">com.nightskygames.ringmaster</string>
+    <string name="custom_url_scheme">com.nightskygames.ringmaster</string>
+</resources>

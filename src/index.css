@@ -1,0 +1,33 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Helvetica Neue", Arial, sans-serif;
+  --font-display: "Arial Black", "Helvetica Neue", sans-serif;
+  
+  --color-accent: #FF3D00;
+  --color-gold: #FFD700;
+  --color-card: #1A1A1A;
+  --color-border: #333333;
+  --color-bg: #0D0D0D;
+}
+
+@layer base {
+  body {
+    @apply bg-bg text-white font-sans;
+  }
+  
+  h1, h2, h3, h4 {
+    @apply font-display uppercase tracking-tighter;
+  }
+
+  @keyframes shake {
+    0%, 100% { transform: translate(0, 0); }
+    25% { transform: translate(-5px, 5px); }
+    50% { transform: translate(5px, -5px); }
+    75% { transform: translate(-5px, -5px); }
+  }
+
+  .animate-shake {
+    animation: shake 0.1s ease-in-out infinite;
+  }
+}
