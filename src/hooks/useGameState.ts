@@ -23,7 +23,6 @@ import {
 import {
   INITIAL_MONEY,
   INITIAL_POPULARITY,
-  STARTING_FIGHTERS,
   AVAILABLE_FACILITIES,
   FIGHTER_NAMES,
   ALIGNMENTS,
@@ -39,6 +38,8 @@ import {
 import { computePromotionPopularityDelta } from '../lib/promotionPopularity';
 import { computeShowPrepDays } from '../lib/showScheduling';
 import { computeMatchScoreBreakdown } from '../lib/matchScoring';
+import { matchSetupCostAtIndex } from '../lib/showEconomy';
+import { OPENING_DRAFT_PICKS } from '../lib/draftRoster';
 import { computeNightTicketSale } from '../lib/showEconomy';
 import { rollShowFightEnergyCost, showFightInjuryChance } from '../lib/fighterShow';
 
@@ -53,7 +54,8 @@ function createFreshGameState(): GameState {
   return {
     money: INITIAL_MONEY,
     popularity: INITIAL_POPULARITY,
-    roster: STARTING_FIGHTERS,
+    roster: [],
+    hasCompletedOpeningDraft: false,
     facilities: AVAILABLE_FACILITIES,
     activeMarketing: [],
     history: [],
@@ -160,12 +162,17 @@ function normalizeLoadedState(raw: unknown): GameState {
     }
   }
 
+  const roster = Array.isArray(r.roster) ? (r.roster as Fighter[]).map(normalizeFighter) : [];
+  const hasCompletedOpeningDraft =
+    typeof (r as Partial<GameState>).hasCompletedOpeningDraft === 'boolean'
+      ? (r as Partial<GameState>).hasCompletedOpeningDraft!
+      : true;
+
   return {
     money: typeof r.money === 'number' ? r.money : INITIAL_MONEY,
     popularity: typeof r.popularity === 'number' ? r.popularity : INITIAL_POPULARITY,
-    roster: Array.isArray(r.roster)
-      ? (r.roster as Fighter[]).map(normalizeFighter)
-      : STARTING_FIGHTERS,
+    roster,
+    hasCompletedOpeningDraft,
     facilities,
     activeMarketing: Array.isArray(r.activeMarketing) ? (r.activeMarketing as MarketingCampaign[]) : [],
     history: Array.isArray(r.history) ? (r.history as Show[]) : [],
@@ -229,8 +236,7 @@ function computeShowSimulation(
   /** Advance ticket income (already added to cash on prep nights); included here for results UI and net profit. */
   const revenue = ticketRevenue;
 
-  const setupCostSteps = [0, 1500, 0];
-  const setupCost = matches.reduce((acc, _, idx) => acc + (setupCostSteps[idx] || 0), 0);
+  const setupCost = matches.reduce((acc, _, idx) => acc + matchSetupCostAtIndex(venueId, idx), 0);
   const totalCost = venue.cost + setupCost;
 
   const { delta: popularityGain, expectedRating: expectedShowRating } = computePromotionPopularityDelta(
@@ -544,9 +550,8 @@ function computeRecruitTrainingResolution(
   };
 }
 
-function setupCostForMatches(matches: Match[]): number {
-  const setupCostSteps = [0, 1500, 0];
-  return matches.reduce((acc, _, idx) => acc + (setupCostSteps[idx] || 0), 0);
+function setupCostForMatches(matches: Match[], venueId: string): number {
+  return matches.reduce((acc, _, idx) => acc + matchSetupCostAtIndex(venueId, idx), 0);
 }
 
 /** If non-null, the booked show cannot be run yet (or the card is invalid). */
@@ -571,7 +576,7 @@ export function getPlannedShowRunBlockReason(state: GameState): string | null {
     }
   }
 
-  const setup = setupCostForMatches(plan.matches);
+  const setup = setupCostForMatches(plan.matches, plan.venueId);
   const total = venue.cost + setup;
   if (state.money < total) return 'Not enough cash to run this card.';
 
@@ -847,6 +852,14 @@ export function useGameState() {
     }
   };
 
+  const completeOpeningDraft = useCallback((nextRoster: Fighter[]) => {
+    setState((prev) => ({
+      ...prev,
+      roster: nextRoster.slice(0, OPENING_DRAFT_PICKS),
+      hasCompletedOpeningDraft: true,
+    }));
+  }, []);
+
   const addMoney = (amount: number) => {
     setState((prev) => ({ ...prev, money: prev.money + amount }));
   };
@@ -868,5 +881,6 @@ export function useGameState() {
     submitRecruitTrainingChoices,
     scheduleUpcomingShow,
     endDay,
+    completeOpeningDraft,
   };
 }

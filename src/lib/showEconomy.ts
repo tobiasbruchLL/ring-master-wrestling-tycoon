@@ -6,6 +6,38 @@ function venueById(venueId: string): Venue {
   return VENUES.find((v) => v.id === venueId) ?? VENUES[0];
 }
 
+/**
+ * Base fees at Backyard (index 0 = first match). Extra slots ramp for bigger cards;
+ * `matchSetupCostAtIndex` applies a venue multiplier on top.
+ */
+const BASE_MATCH_SETUP_COST_BY_INDEX: readonly number[] = [0, 250, 400, 600, 800, 1050, 1350];
+
+/** Sharp step-up by venue booking cost (bigger buildings = much pricier extra matches). */
+function additionalMatchCostMultiplier(venue: Venue): number {
+  if (venue.cost >= 5000) return 4.5;
+  if (venue.cost >= 1500) return 2.75;
+  if (venue.cost >= 500) return 1.7;
+  return 1;
+}
+
+/** Max matches on the card: each venue tier above Backyard adds one slot (4 … 7 for the default roster of venues). */
+export function maxMatchesForVenue(venueId: string): number {
+  const idx = VENUES.findIndex((v) => v.id === venueId);
+  const rank = idx >= 0 ? idx : 0;
+  return 3 + (rank + 1);
+}
+
+/**
+ * Per-match setup/production charge when booking or running a show.
+ * First match is free; additional matches scale sharply with venue tier.
+ */
+export function matchSetupCostAtIndex(venueId: string, matchIndex: number): number {
+  const venue = venueById(venueId);
+  const mult = additionalMatchCostMultiplier(venue);
+  const base = BASE_MATCH_SETUP_COST_BY_INDEX[matchIndex] ?? 0;
+  return Math.round(base * mult);
+}
+
 export function venueAudienceCap(venueId: string): number {
   return venueById(venueId).maxAudience;
 }

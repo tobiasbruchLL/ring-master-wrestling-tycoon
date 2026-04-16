@@ -143,6 +143,8 @@ export type GameState = {
   money: number;
   popularity: number;
   roster: Fighter[];
+  /** False only on a brand-new save before the opening draft (five picks) finishes. */
+  hasCompletedOpeningDraft: boolean;
   facilities: Facility[];
   activeMarketing: MarketingCampaign[];
   history: Show[];

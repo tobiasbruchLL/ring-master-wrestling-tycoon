@@ -4,6 +4,7 @@ import { Plus, X, AlertCircle, ChevronDown, ChevronLeft, ChevronRight } from 'lu
 import { GameState, Match, Fighter, Show } from '../types';
 import { cn, formatCurrency, formatNumber, fighterPower } from '../lib/utils';
 import { computeShowPrepDays } from '../lib/showScheduling';
+import { matchSetupCostAtIndex, maxMatchesForVenue } from '../lib/showEconomy';
 import { VENUES } from '../constants';
 interface ShowPlannerProps {
   state: GameState;
@@ -20,13 +21,6 @@ interface ShowPlannerProps {
 
 function createEmptyMatch(): Match {
   return { id: Math.random().toString(), fighterAId: '', fighterBId: '' };
-}
-
-// Keep in sync with `setupCostSteps` in `useGameState.ts`.
-const MATCH_SETUP_COST_BY_INDEX = [0, 1500, 0] as const;
-
-function matchSetupCostAtIndex(index: number): number {
-  return MATCH_SETUP_COST_BY_INDEX[index] ?? 0;
 }
 
 /** Short uppercase text for buzz modifier badges (matches `matchScoring` labels). */
@@ -93,8 +87,14 @@ export default function ShowPlanner({ state, onScheduleShow, onCancel, calculate
     prevMatchCount.current = matches.length;
   }, [matches.length, scrollToSlide]);
 
+  const matchCap = maxMatchesForVenue(selectedVenueId);
+
+  useEffect(() => {
+    setMatches((m) => (m.length > matchCap ? m.slice(0, matchCap) : m));
+  }, [matchCap]);
+
   const addMatch = () => {
-    if (matches.length < 3) {
+    if (matches.length < matchCap) {
       setMatches([...matches, createEmptyMatch()]);
     }
   };
@@ -119,7 +119,10 @@ export default function ShowPlanner({ state, onScheduleShow, onCancel, calculate
   };
 
   const selectedVenue = VENUES.find(v => v.id === selectedVenueId) || VENUES[0];
-  const totalSetupCost = matches.reduce((acc, _, idx) => acc + matchSetupCostAtIndex(idx), 0);
+  const totalSetupCost = matches.reduce(
+    (acc, _, idx) => acc + matchSetupCostAtIndex(selectedVenueId, idx),
+    0,
+  );
   const totalCost = selectedVenue.cost + totalSetupCost;
   const canAfford = state.money >= totalCost;
   const hasRecoveringOnCard = matches.some((m) => {
@@ -172,7 +175,7 @@ export default function ShowPlanner({ state, onScheduleShow, onCancel, calculate
         <div className="space-y-4">
           <div className="flex items-center gap-3">
             <span className="text-[10px] font-display text-gold uppercase tracking-widest">
-              Matches: {matches.length}/3
+              Matches: {matches.length}/{matchCap}
             </span>
             <div className="h-px bg-border flex-1" />
           </div>
@@ -279,7 +282,9 @@ export default function ShowPlanner({ state, onScheduleShow, onCancel, calculate
                           </div>
                           <div className="flex justify-between border-t border-border/50 pt-2 text-xs font-display uppercase tracking-[2px] text-zinc-500">
                             <span>Match cost</span>
-                            <span className="font-bold text-white">{formatCurrency(matchSetupCostAtIndex(idx))}</span>
+                            <span className="font-bold text-white">
+                              {formatCurrency(matchSetupCostAtIndex(selectedVenueId, idx))}
+                            </span>
                           </div>
                         </div>
                       );
@@ -307,7 +312,7 @@ export default function ShowPlanner({ state, onScheduleShow, onCancel, calculate
             ))}
           </div>
 
-          {matches.length < 3 && (
+          {matches.length < matchCap && (
             <button
               type="button"
               onClick={addMatch}

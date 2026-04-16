@@ -16,6 +16,7 @@ import SettingsMenu from './components/SettingsMenu';
 import DebugMenu from './components/DebugMenu';
 import ShowResultModal from './components/ShowResultModal';
 import RecruitTrainingModal from './components/RecruitTrainingModal';
+import OnboardingDraftOverlay from './components/OnboardingDraftOverlay';
 import { useToastStack } from './components/ToastStack';
 import { Match, ShowSimulationResult, hasPendingRecruitTraining, getRecruitSlotCap } from './types';
 
@@ -38,6 +39,7 @@ export default function App() {
     submitRecruitTrainingChoices,
     scheduleUpcomingShow,
     endDay,
+    completeOpeningDraft,
   } = useGameState();
 
   const { enqueueMessage, enqueueInjuryRecoveries, stack: toastStack } = useToastStack();
@@ -376,6 +378,10 @@ export default function App() {
         />
 
         {toastStack}
+
+        {!state.hasCompletedOpeningDraft && (
+          <OnboardingDraftOverlay onComplete={completeOpeningDraft} />
+        )}
       </div>
     </div>
   );
