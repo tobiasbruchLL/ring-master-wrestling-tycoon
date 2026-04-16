@@ -1,25 +1,28 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Plus, X, AlertCircle } from 'lucide-react';
+import { Plus, X, AlertCircle, ChevronDown } from 'lucide-react';
 import { GameState, Match, Fighter, Show } from '../types';
-import { cn } from '../lib/utils';
+import { cn, formatCurrency, formatNumber } from '../lib/utils';
+import { VENUES } from '../constants';
+import { computeShowPrepDays } from '../lib/showScheduling';
 
 interface ShowPlannerProps {
   state: GameState;
-  onRunShow: (matches: Match[], venueId: string) => void;
+  onScheduleShow: (matches: Match[], venueId: string) => void;
   onCancel: () => void;
   calculateMatchScore: (match: Match, roster: Fighter[], history: Show[]) => { 
-    powerA: number, 
-    powerB: number, 
+    popularityA: number, 
+    popularityB: number, 
     multipliers: { label: string, value: number }[], 
     totalScore: number,
     projectedStars: number 
   } | null;
 }
 
-export default function ShowPlanner({ state, onRunShow, onCancel, calculateMatchScore }: ShowPlannerProps) {
+export default function ShowPlanner({ state, onScheduleShow, onCancel, calculateMatchScore }: ShowPlannerProps) {
   const [matches, setMatches] = useState<Match[]>([]);
   const [selectedVenueId, setSelectedVenueId] = useState<string>(VENUES[0].id);
+  const [venueModalOpen, setVenueModalOpen] = useState(false);
   const [selectingFor, setSelectingFor] = useState<{ matchIndex: number, side: 'A' | 'B' } | null>(null);
 
   const addMatch = () => {
@@ -51,6 +54,16 @@ export default function ShowPlanner({ state, onRunShow, onCancel, calculateMatch
   const totalCost = selectedVenue.cost + totalSetupCost;
   const canAfford = state.money >= totalCost;
   const isValid = matches.length > 0 && matches.every(m => m.fighterAId && m.fighterBId) && canAfford;
+  const prepPreview =
+    matches.length > 0 && matches.every((m) => m.fighterAId && m.fighterBId)
+      ? computeShowPrepDays(matches.length, selectedVenueId)
+      : null;
+
+  const totalBuzzPreview = matches.reduce((sum, m) => {
+    if (!m.fighterAId || !m.fighterBId) return sum;
+    const breakdown = calculateMatchScore(m, state.roster, state.history);
+    return breakdown ? sum + breakdown.totalScore : sum;
+  }, 0);
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col bg-bg">
@@ -70,32 +83,24 @@ export default function ShowPlanner({ state, onRunShow, onCancel, calculateMatch
             <span className="text-[10px] font-display text-gold uppercase tracking-widest">Select Venue</span>
             <div className="h-px bg-border flex-1" />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            {VENUES.map(venue => {
-              const locked = state.popularity < venue.minPopularity;
-              return (
-                <button
-                  key={venue.id}
-                  disabled={locked}
-                  onClick={() => setSelectedVenueId(venue.id)}
-                  className={cn(
-                    "p-4 border text-left transition-all relative overflow-hidden",
-                    selectedVenueId === venue.id ? "border-accent bg-accent/5" : "border-border bg-card hover:border-accent",
-                    locked && "opacity-50 grayscale cursor-not-allowed"
-                  )}
-                >
-                  <p className="text-xs font-display uppercase text-white">{venue.name}</p>
-                  <p className="text-[10px] font-bold text-zinc-500 uppercase mt-1">Cost: {formatCurrency(venue.cost)}</p>
-                  <p className="text-[10px] font-bold text-accent uppercase mt-0.5">{venue.multiplier}x Earnings</p>
-                  {locked && (
-                    <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
-                      <span className="text-[8px] font-display uppercase tracking-widest text-white">Pop {venue.minPopularity} Required</span>
-                    </div>
-                  )}
-                </button>
-              );
-            })}
-          </div>
+          <button
+            type="button"
+            onClick={() => setVenueModalOpen(true)}
+            className="flex w-full items-stretch gap-4 border border-accent bg-accent/5 p-4 text-left transition-all hover:bg-accent/10"
+          >
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-display uppercase text-white">{selectedVenue.name}</p>
+              <p className="mt-1 text-[10px] font-bold uppercase text-zinc-500">
+                Cost {formatCurrency(selectedVenue.cost)} · Cap {formatNumber(selectedVenue.maxAudience)} · from{' '}
+                {formatCurrency(selectedVenue.baseTicketPrice)}
+              </p>
+              <p className="mt-0.5 text-[10px] font-bold uppercase text-accent">{selectedVenue.multiplier}x demand</p>
+            </div>
+            <div className="flex shrink-0 flex-col items-center justify-center gap-1 text-zinc-500">
+              <ChevronDown size={18} className="text-gold" />
+              <span className="text-[8px] font-display uppercase tracking-widest">Change</span>
+            </div>
+          </button>
         </div>
 
         {matches.map((match, idx) => (
@@ -139,12 +144,12 @@ export default function ShowPlanner({ state, onRunShow, onCancel, calculateMatch
               return (
                 <div className="bg-card/50 border border-border/50 p-4 space-y-2">
                   <div className="flex justify-between text-[10px] font-display uppercase tracking-widest text-zinc-500">
-                    <span>1st Fighter Power</span>
-                    <span className="text-white">+{breakdown.powerA}</span>
+                    <span>1st Fighter Popularity</span>
+                    <span className="text-white">+{breakdown.popularityA}</span>
                   </div>
                   <div className="flex justify-between text-[10px] font-display uppercase tracking-widest text-zinc-500">
-                    <span>2nd Fighter Power</span>
-                    <span className="text-white">+{breakdown.powerB}</span>
+                    <span>2nd Fighter Popularity</span>
+                    <span className="text-white">+{breakdown.popularityB}</span>
                   </div>
                   {breakdown.multipliers.map((m, mIdx) => (
                     <div key={mIdx} className="flex justify-between text-[10px] font-display uppercase tracking-widest text-gold">
@@ -153,7 +158,7 @@ export default function ShowPlanner({ state, onRunShow, onCancel, calculateMatch
                     </div>
                   ))}
                   <div className="pt-2 border-t border-border/50 flex justify-between text-xs font-display uppercase tracking-[2px] text-accent">
-                    <span>Match Score</span>
+                    <span>Generated Buzz</span>
                     <span className="font-bold">{breakdown.totalScore}</span>
                   </div>
                 </div>
@@ -182,6 +187,14 @@ export default function ShowPlanner({ state, onRunShow, onCancel, calculateMatch
               <span>Match Setup: {formatCurrency(totalSetupCost)}</span>
               <span>Budget: {formatCurrency(state.money)}</span>
             </div>
+            <p className="text-[10px] font-display uppercase tracking-widest text-zinc-500">
+              Total buzz: {totalBuzzPreview}
+            </p>
+            {prepPreview !== null && (
+              <p className="text-[10px] font-bold uppercase tracking-wide text-gold">
+                Prep time: {prepPreview} days
+              </p>
+            )}
           </div>
           {!canAfford && matches.length > 0 && (
             <p className="text-center text-[10px] font-bold uppercase text-accent animate-pulse">
@@ -203,7 +216,7 @@ export default function ShowPlanner({ state, onRunShow, onCancel, calculateMatch
         <button
           type="button"
           disabled={!isValid}
-          onClick={() => onRunShow(matches, selectedVenueId)}
+          onClick={() => onScheduleShow(matches, selectedVenueId)}
           className={cn(
             'min-w-0 flex-1 py-5 font-display text-lg uppercase tracking-tighter transition-all sm:text-xl',
             isValid
@@ -211,9 +224,75 @@ export default function ShowPlanner({ state, onRunShow, onCancel, calculateMatch
               : 'cursor-not-allowed bg-zinc-800 text-zinc-600'
           )}
         >
-          Start Show
+          Schedule Show
         </button>
       </div>
+
+      <AnimatePresence>
+        {venueModalOpen && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 20 }}
+            className="absolute inset-0 z-[48] flex flex-col bg-bg p-8"
+          >
+            <div className="mb-6 flex shrink-0 items-center justify-between">
+              <h3 className="text-2xl font-display uppercase text-white">
+                Select <span className="text-accent">Venue</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setVenueModalOpen(false)}
+                className="text-zinc-500 hover:text-white"
+                aria-label="Close venue list"
+              >
+                <X size={24} />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+              <div className="grid grid-cols-2 gap-3 pb-4">
+                {VENUES.map((venue) => {
+                  const locked = state.popularity < venue.minPopularity;
+                  return (
+                    <button
+                      key={venue.id}
+                      type="button"
+                      disabled={locked}
+                      onClick={() => {
+                        setSelectedVenueId(venue.id);
+                        setVenueModalOpen(false);
+                      }}
+                      className={cn(
+                        'relative overflow-hidden border p-4 text-left transition-all',
+                        selectedVenueId === venue.id
+                          ? 'border-accent bg-accent/5'
+                          : 'border-border bg-card hover:border-accent',
+                        locked && 'cursor-not-allowed opacity-50 grayscale'
+                      )}
+                    >
+                      <p className="text-xs font-display uppercase text-white">{venue.name}</p>
+                      <p className="mt-1 text-[10px] font-bold uppercase text-zinc-500">
+                        Cost: {formatCurrency(venue.cost)}
+                      </p>
+                      <p className="mt-0.5 text-[10px] font-bold uppercase text-zinc-500">
+                        Cap {formatNumber(venue.maxAudience)} · from {formatCurrency(venue.baseTicketPrice)}
+                      </p>
+                      <p className="mt-0.5 text-[10px] font-bold uppercase text-accent">{venue.multiplier}x demand</p>
+                      {locked && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/60">
+                          <span className="text-[8px] font-display uppercase tracking-widest text-white">
+                            Pop {venue.minPopularity} Required
+                          </span>
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Fighter selection covers planner including action bar */}
       <AnimatePresence>
@@ -315,6 +394,3 @@ function FighterSlot({ fighter, onClick, active, align }: {
   );
 }
 
-import { formatCurrency as utilsFormatCurrency } from '../lib/utils';
-import { VENUES } from '../constants';
-const formatCurrency = utilsFormatCurrency;

@@ -14,6 +14,7 @@ import {
   RecruitTrainingChoice,
   RecruitTrainingSessionSummary,
   getRecruitSlotCap,
+  hasPendingRecruitTraining,
   ShowSimulationResult,
   SimulatedMatchOutcomeDetail,
   FighterBookingDelta,
@@ -35,12 +36,14 @@ import {
   RECRUIT_TRAINING_LOW_ENERGY_THRESHOLD,
 } from '../lib/recruitTraining';
 import { computePromotionPopularityDelta } from '../lib/promotionPopularity';
+import { computeShowPrepDays } from '../lib/showScheduling';
+import { computeMatchScoreBreakdown } from '../lib/matchScoring';
+import { computeNightTicketSale } from '../lib/showEconomy';
 
 const STORAGE_KEY = 'ring_master_save';
 
 /** Fixed HQ baseline (previously level-1 Local Arena / Training Gym upgrades). */
 const BASE_PRODUCTION_RATING = 1;
-const BASE_MAX_ATTENDANCE = 200 + 300 * BASE_PRODUCTION_RATING;
 
 const TRAINING_DAYS_TOTAL = 10;
 
@@ -53,9 +56,25 @@ function createFreshGameState(): GameState {
     activeMarketing: [],
     history: [],
     currentShowNumber: 1,
+    currentDay: 1,
+    upcomingShow: null,
     recruitProspects: [],
     activeRecruits: [],
   };
+}
+
+function normalizeActiveRecruits(raw: unknown): ActiveRecruit[] {
+  if (!Array.isArray(raw)) return [];
+  return (raw as ActiveRecruit[]).map((r) => {
+    const legacy = r as ActiveRecruit & { enlistedAtShow?: number };
+    const enlistedOnDay =
+      typeof legacy.enlistedOnDay === 'number'
+        ? legacy.enlistedOnDay
+        : typeof legacy.enlistedAtShow === 'number'
+          ? legacy.enlistedAtShow
+          : 1;
+    return { ...legacy, enlistedOnDay };
+  });
 }
 
 function normalizeFacilities(raw: Facility[] | undefined): Facility[] {
@@ -72,6 +91,34 @@ function normalizeLoadedState(raw: unknown): GameState {
   const r = raw as Partial<GameState>;
   const facilities = normalizeFacilities(Array.isArray(r.facilities) ? (r.facilities as Facility[]) : undefined);
 
+  const currentShowNumber = typeof r.currentShowNumber === 'number' ? r.currentShowNumber : 1;
+  const currentDay =
+    typeof r.currentDay === 'number' ? r.currentDay : currentShowNumber;
+
+  let upcomingShow: GameState['upcomingShow'] = null;
+  if (r.upcomingShow && typeof r.upcomingShow === 'object') {
+    const u = r.upcomingShow as Partial<GameState['upcomingShow']>;
+    if (
+      Array.isArray(u.matches) &&
+      typeof u.venueId === 'string' &&
+      typeof u.showDay === 'number' &&
+      typeof u.prepDays === 'number'
+    ) {
+      const bookedOnDay =
+        typeof u.bookedOnDay === 'number' ? u.bookedOnDay : u.showDay - u.prepDays;
+      upcomingShow = {
+        matches: u.matches as Match[],
+        venueId: u.venueId,
+        prepDays: u.prepDays,
+        showDay: u.showDay,
+        bookedOnDay,
+        ticketsSoldTotal: typeof u.ticketsSoldTotal === 'number' ? u.ticketsSoldTotal : 0,
+        advanceTicketRevenueTotal:
+          typeof u.advanceTicketRevenueTotal === 'number' ? u.advanceTicketRevenueTotal : 0,
+      };
+    }
+  }
+
   return {
     money: typeof r.money === 'number' ? r.money : INITIAL_MONEY,
     popularity: typeof r.popularity === 'number' ? r.popularity : INITIAL_POPULARITY,
@@ -79,10 +126,12 @@ function normalizeLoadedState(raw: unknown): GameState {
     facilities,
     activeMarketing: Array.isArray(r.activeMarketing) ? (r.activeMarketing as MarketingCampaign[]) : [],
     history: Array.isArray(r.history) ? (r.history as Show[]) : [],
-    currentShowNumber: typeof r.currentShowNumber === 'number' ? r.currentShowNumber : 1,
+    currentShowNumber,
+    currentDay,
+    upcomingShow,
     lastShowResult: r.lastShowResult,
     recruitProspects: Array.isArray(r.recruitProspects) ? (r.recruitProspects as RecruitProspect[]) : [],
-    activeRecruits: Array.isArray(r.activeRecruits) ? (r.activeRecruits as ActiveRecruit[]) : [],
+    activeRecruits: normalizeActiveRecruits(r.activeRecruits),
   };
 }
 
@@ -91,8 +140,8 @@ function computeShowSimulation(
   matches: Match[],
   venueId: string,
   calculateMatchScore: (match: Match, roster: Fighter[], history: Show[]) => {
-    powerA: number;
-    powerB: number;
+    popularityA: number;
+    popularityB: number;
     multipliers: { label: string; value: number }[];
     totalScore: number;
     projectedStars: number;
@@ -121,14 +170,21 @@ function computeShowSimulation(
   const productionRating = BASE_PRODUCTION_RATING;
   const showRating = Math.min(5, (avgRating + productionRating) / 2);
 
-  const maxAttendance = BASE_MAX_ATTENDANCE;
-  const attendance = Math.floor(
-    Math.min(maxAttendance, prev.popularity * 150 * (0.8 + Math.random() * 0.4)),
-  );
+  const planMatchesUpcoming =
+    prev.upcomingShow &&
+    prev.upcomingShow.venueId === venueId &&
+    plannedShowMatchesSame(prev.upcomingShow.matches, matches);
 
-  const baseTicketPrice = 8;
-  const qualityBonus = showRating * 3;
-  const revenue = Math.floor(attendance * (baseTicketPrice + qualityBonus) * venue.multiplier);
+  const soldBaseline = planMatchesUpcoming ? (prev.upcomingShow!.ticketsSoldTotal ?? 0) : 0;
+  const ticketRevenue = planMatchesUpcoming ? (prev.upcomingShow!.advanceTicketRevenueTotal ?? 0) : 0;
+
+  const cap = venue.maxAudience;
+  const raw =
+    soldBaseline <= 0 ? 0 : Math.floor(soldBaseline * (0.9 + Math.random() * 0.19));
+  const attendance = Math.min(cap, raw);
+
+  /** Advance ticket income (already added to cash on prep nights); included here for results UI and net profit. */
+  const revenue = ticketRevenue;
 
   const setupCostSteps = [0, 1500, 0];
   const setupCost = matches.reduce((acc, _, idx) => acc + (setupCostSteps[idx] || 0), 0);
@@ -145,6 +201,7 @@ function computeShowSimulation(
     name: `Show #${prev.currentShowNumber}`,
     matches: simulatedMatches,
     revenue,
+    ticketsSoldTotal: soldBaseline,
     attendance,
     rating: showRating,
     popularityGain,
@@ -169,14 +226,7 @@ function computeShowSimulation(
     }
   }
 
-  const activeRecruits = prev.activeRecruits
-    .filter((r) => r.daysTrained < TRAINING_DAYS_TOTAL)
-    .map((r) => {
-      if (r.enlistedAtShow < newShowNumber) {
-        return { ...r, needsTrainingChoice: true };
-      }
-      return r;
-    });
+  const activeRecruits = prev.activeRecruits.filter((r) => r.daysTrained < TRAINING_DAYS_TOTAL);
 
   const updatedRoster = prev.roster.map((f) => {
     const wasInShow = matches.some((m) => m.fighterAId === f.id || m.fighterBId === f.id);
@@ -209,17 +259,30 @@ function computeShowSimulation(
     };
   });
 
+  const showPatch = {
+    money: prev.money - totalCost,
+    popularity: nextPromotionPopularity,
+    roster: updatedRoster,
+    history: [newShow, ...prev.history],
+    currentShowNumber: newShowNumber,
+    lastShowResult: newShow,
+    recruitProspects,
+    activeRecruits,
+    upcomingShow: null as GameState['upcomingShow'],
+  };
+
+  const mergedAfterShow: GameState = { ...prev, ...showPatch };
+  const turnover = computeDayTurnover(mergedAfterShow);
+
   return {
     perMatchOutcomes,
     patch: {
-      money: prev.money + revenue - totalCost,
-      popularity: nextPromotionPopularity,
-      roster: updatedRoster,
-      history: [newShow, ...prev.history],
-      currentShowNumber: newShowNumber,
-      lastShowResult: newShow,
-      recruitProspects,
-      activeRecruits,
+      ...showPatch,
+      currentDay: turnover.currentDay,
+      activeRecruits: turnover.activeRecruits,
+      recruitProspects: turnover.recruitProspects,
+      upcomingShow: turnover.upcomingShow,
+      money: showPatch.money + turnover.moneyDelta,
     },
   };
 }
@@ -235,6 +298,14 @@ function samplePoisson(lambda: number): number {
     p *= Math.random();
   }
   return k - 1;
+}
+
+function plannedShowMatchesSame(a: Match[], b: Match[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].fighterAId !== b[i].fighterAId || a[i].fighterBId !== b[i].fighterBId) return false;
+  }
+  return true;
 }
 
 function rollRecruitProspect(popularity: number): RecruitProspect {
@@ -409,6 +480,90 @@ function computeRecruitTrainingResolution(
   };
 }
 
+function setupCostForMatches(matches: Match[]): number {
+  const setupCostSteps = [0, 1500, 0];
+  return matches.reduce((acc, _, idx) => acc + (setupCostSteps[idx] || 0), 0);
+}
+
+/** If non-null, the booked show cannot be run yet (or the card is invalid). */
+export function getPlannedShowRunBlockReason(state: GameState): string | null {
+  const plan = state.upcomingShow;
+  if (!plan) return null;
+  if (state.currentDay < plan.showDay) return 'Show is not booked for today yet.';
+
+  const venue = VENUES.find((v) => v.id === plan.venueId) || VENUES[0];
+  if (state.popularity < venue.minPopularity) {
+    return `Need ${venue.minPopularity} popularity for ${venue.name}.`;
+  }
+
+  const rosterIds = new Set(state.roster.map((f) => f.id));
+  for (const m of plan.matches) {
+    if (!m.fighterAId || !m.fighterBId) return 'Card is incomplete.';
+    if (!rosterIds.has(m.fighterAId) || !rosterIds.has(m.fighterBId)) return 'A wrestler on the card is no longer on the roster.';
+  }
+
+  const setup = setupCostForMatches(plan.matches);
+  const total = venue.cost + setup;
+  if (state.money < total) return 'Not enough cash to run this card.';
+
+  return null;
+}
+
+/** Booked show is tonight and the card can legally be run (money, roster, venue requirements). */
+export function isPlannedShowRunnableNow(state: GameState): boolean {
+  const plan = state.upcomingShow;
+  if (!plan || state.currentDay < plan.showDay) return false;
+  return getPlannedShowRunBlockReason(state) === null;
+}
+
+function computeDayTurnover(
+  prev: GameState,
+): Pick<GameState, 'currentDay' | 'activeRecruits' | 'recruitProspects' | 'upcomingShow'> & {
+  moneyDelta: number;
+} {
+  let moneyDelta = 0;
+  let nextUpcoming = prev.upcomingShow;
+  const plan = prev.upcomingShow;
+  if (plan && prev.currentDay < plan.showDay) {
+    const sale = computeNightTicketSale(plan, prev.roster, prev.history, prev.popularity);
+    moneyDelta = sale.income;
+    if (sale.tickets > 0) {
+      nextUpcoming = {
+        ...plan,
+        ticketsSoldTotal: (plan.ticketsSoldTotal ?? 0) + sale.tickets,
+        advanceTicketRevenueTotal: (plan.advanceTicketRevenueTotal ?? 0) + sale.income,
+      };
+    }
+  }
+
+  const nextDay = prev.currentDay + 1;
+  const activeRecruits = prev.activeRecruits.map((r) => {
+    if (r.daysTrained >= TRAINING_DAYS_TOTAL) return r;
+    return { ...r, needsTrainingChoice: true };
+  });
+
+  let recruitProspects = prev.recruitProspects;
+  const slotCap = getRecruitSlotCap(prev);
+  if (slotCap > 0 && recruitProspects.length < 6) {
+    const rep = prev.popularity;
+    const room = 6 - recruitProspects.length;
+    const arrivals = Math.min(room, samplePoisson(0.35));
+    if (arrivals > 0) {
+      const fresh: RecruitProspect[] = [];
+      for (let i = 0; i < arrivals; i++) fresh.push(rollRecruitProspect(rep));
+      recruitProspects = [...recruitProspects, ...fresh];
+    }
+  }
+
+  return {
+    currentDay: nextDay,
+    activeRecruits,
+    recruitProspects,
+    moneyDelta,
+    upcomingShow: nextUpcoming,
+  };
+}
+
 export function useGameState() {
   const [state, setState] = useState<GameState>(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -519,7 +674,7 @@ export function useGameState() {
         image: prospect.image,
         mentorIds: [mentorAId, mentorBId],
         daysTrained: 0,
-        enlistedAtShow: prev.currentShowNumber,
+        enlistedOnDay: prev.currentDay,
         needsTrainingChoice: false,
       };
 
@@ -547,62 +702,7 @@ export function useGameState() {
   };
 
   const calculateMatchScore = useCallback((match: Match, roster: Fighter[], history: Show[]) => {
-    const fighterA = roster.find((f) => f.id === match.fighterAId);
-    const fighterB = roster.find((f) => f.id === match.fighterBId);
-    if (!fighterA || !fighterB) return null;
-
-    const powerA = Math.round(
-      (fighterA.stats.strength + fighterA.stats.charisma + fighterA.stats.stamina + fighterA.stats.skill) / 4,
-    );
-    const powerB = Math.round(
-      (fighterB.stats.strength + fighterB.stats.charisma + fighterB.stats.stamina + fighterB.stats.skill) / 4,
-    );
-
-    let totalScore = powerA + powerB;
-    const multipliers: { label: string; value: number }[] = [];
-
-    if (fighterA.alignment !== fighterB.alignment) {
-      totalScore *= 1.5;
-      multipliers.push({ label: 'Heel vs Face bonus', value: 1.5 });
-    }
-
-    const statDiff = Math.abs(powerA - powerB);
-    if (statDiff < 15) {
-      totalScore *= 1.5;
-      multipliers.push({ label: 'Evenly matched bonus', value: 1.5 });
-    }
-
-    const traits = [fighterA.trait, fighterB.trait];
-    if (traits.includes('Technician') && traits.includes('High Flyer')) {
-      totalScore *= 1.2;
-      multipliers.push({ label: 'Technical Masterpiece', value: 1.2 });
-    } else if (traits.includes('Brawler') && traits.includes('Powerhouse')) {
-      totalScore *= 1.2;
-      multipliers.push({ label: 'Clash of Titans', value: 1.2 });
-    }
-
-    const lastShow = history[0];
-    if (lastShow) {
-      const wasInLastShow = lastShow.matches.some(
-        (m) =>
-          (m.fighterAId === fighterA.id && m.fighterBId === fighterB.id) ||
-          (m.fighterAId === fighterB.id && m.fighterBId === fighterA.id),
-      );
-      if (wasInLastShow) {
-        totalScore *= 0.5;
-        multipliers.push({ label: 'Repeat Matchup Penalty', value: 0.5 });
-      }
-    }
-
-    const projectedStars = Math.min(5, Math.max(1, totalScore / 80));
-
-    return {
-      powerA,
-      powerB,
-      multipliers,
-      totalScore: Math.floor(totalScore),
-      projectedStars,
-    };
+    return computeMatchScoreBreakdown(match, roster, history);
   }, []);
 
   const simulateShow = useCallback(
@@ -619,6 +719,44 @@ export function useGameState() {
       const result = computeShowSimulation(prev, matches, venueId, calculateMatchScore);
       return { ...prev, ...result.patch };
     });
+  };
+
+  const scheduleUpcomingShow = (matches: Match[], venueId: string) => {
+    setState((prev) => {
+      if (prev.upcomingShow) return prev;
+      const prepDays = computeShowPrepDays(matches.length, venueId);
+      const planned: GameState['upcomingShow'] = {
+        matches: matches.map((m) => ({ ...m })),
+        venueId,
+        prepDays,
+        showDay: prev.currentDay + prepDays,
+        bookedOnDay: prev.currentDay,
+        ticketsSoldTotal: 0,
+        advanceTicketRevenueTotal: 0,
+      };
+      return { ...prev, upcomingShow: planned };
+    });
+  };
+
+  const endDay = (): { ok: true } | { ok: false; reason: string } => {
+    if (hasPendingRecruitTraining(state)) {
+      return { ok: false, reason: 'Finish rookie training before ending the day.' };
+    }
+    if (isPlannedShowRunnableNow(state)) {
+      return { ok: false, reason: 'Run the booked show before ending the day.' };
+    }
+    setState((prev) => {
+      const t = computeDayTurnover(prev);
+      return {
+        ...prev,
+        currentDay: t.currentDay,
+        activeRecruits: t.activeRecruits,
+        recruitProspects: t.recruitProspects,
+        upcomingShow: t.upcomingShow,
+        money: prev.money + t.moneyDelta,
+      };
+    });
+    return { ok: true };
   };
 
   const resetGame = () => {
@@ -647,5 +785,7 @@ export function useGameState() {
     dismissRecruitProspect,
     enlistRecruit,
     submitRecruitTrainingChoices,
+    scheduleUpcomingShow,
+    endDay,
   };
 }

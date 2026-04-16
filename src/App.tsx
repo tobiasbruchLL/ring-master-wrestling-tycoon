@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, ReactNode } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Trophy, Users, Building2, Settings as SettingsIcon, UserPlus } from 'lucide-react';
-import { useGameState } from './hooks/useGameState';
+import { useGameState, getPlannedShowRunBlockReason, isPlannedShowRunnableNow } from './hooks/useGameState';
 import { cn, formatNumber } from './lib/utils';
 import { getPromotionPopularityBar } from './lib/promotionPopularity';
 
@@ -35,6 +35,8 @@ export default function App() {
     dismissRecruitProspect,
     enlistRecruit,
     submitRecruitTrainingChoices,
+    scheduleUpcomingShow,
+    endDay,
   } = useGameState();
 
   const recruitCap = getRecruitSlotCap(state);
@@ -81,6 +83,9 @@ export default function App() {
     };
   }, []);
 
+  const plannedShowRunBlockedReason = getPlannedShowRunBlockReason(state);
+  const mustRunShowBeforeEndDay = isPlannedShowRunnableNow(state);
+
   const showToast = (message: string) => {
     if (toastDismissTimerRef.current !== null) {
       window.clearTimeout(toastDismissTimerRef.current);
@@ -90,6 +95,34 @@ export default function App() {
       setToastMessage(null);
       toastDismissTimerRef.current = null;
     }, 3600);
+  };
+
+  const openPlanner = () => {
+    if (state.upcomingShow) {
+      showToast('You already have a show booked.');
+      return;
+    }
+    setCurrentView('planner');
+  };
+
+  const handleRunPlannedShow = () => {
+    const err = getPlannedShowRunBlockReason(state);
+    if (err) {
+      showToast(err);
+      return;
+    }
+    const plan = state.upcomingShow!;
+    setPendingMatches(plan.matches);
+    setPendingShowSimulation(simulateShow(plan.matches, plan.venueId));
+    setCurrentView('simulating');
+  };
+
+  const handleEndDay = () => {
+    const result = endDay();
+    if (result.ok === false) {
+      if (hasPendingRecruitTraining(state)) setRecruitTrainingOpen(true);
+      showToast(result.reason);
+    }
   };
 
   // Debug menu trigger
@@ -105,7 +138,14 @@ export default function App() {
   const renderView = () => {
     switch (currentView) {
       case 'dashboard':
-        return <Dashboard state={state} onPlanShow={() => setCurrentView('planner')} />;
+        return (
+          <Dashboard
+            state={state}
+            onPlanShow={openPlanner}
+            onRunPlannedShow={handleRunPlannedShow}
+            plannedShowRunBlockedReason={plannedShowRunBlockedReason}
+          />
+        );
       case 'roster':
         return <Roster state={state} onHire={hireFighter} onFire={fireFighter} generateFighter={generateRandomFighter} />;
       case 'facilities':
@@ -119,16 +159,17 @@ export default function App() {
           />
         );
       case 'planner':
-        return <ShowPlanner 
-          state={state} 
-          calculateMatchScore={calculateMatchScore}
-          onRunShow={(matches, venueId) => {
-            setPendingMatches(matches);
-            setPendingShowSimulation(simulateShow(matches, venueId));
-            setCurrentView('simulating');
-          }} 
-          onCancel={() => setCurrentView('dashboard')} 
-        />;
+        return (
+          <ShowPlanner
+            state={state}
+            calculateMatchScore={calculateMatchScore}
+            onScheduleShow={(matches, venueId) => {
+              scheduleUpcomingShow(matches, venueId);
+              setCurrentView('dashboard');
+            }}
+            onCancel={() => setCurrentView('dashboard')}
+          />
+        );
       case 'simulating':
         return pendingShowSimulation ? (
           <MatchSimulation
@@ -144,7 +185,14 @@ export default function App() {
           />
         ) : null;
       default:
-        return <Dashboard state={state} onPlanShow={() => setCurrentView('planner')} />;
+        return (
+          <Dashboard
+            state={state}
+            onPlanShow={openPlanner}
+            onRunPlannedShow={handleRunPlannedShow}
+            plannedShowRunBlockedReason={plannedShowRunBlockedReason}
+          />
+        );
     }
   };
 
@@ -155,45 +203,40 @@ export default function App() {
         
         {/* Header */}
         <header
-          className="p-6 border-b-4 border-accent flex justify-end items-center bg-bg sticky top-0 z-40"
+          className="sticky top-0 z-40 flex items-center gap-2 border-b-2 border-accent bg-bg px-3 py-2"
           onClick={handleDebugTap}
         >
           <div
-            className="flex items-center gap-4"
+            className="flex min-w-0 flex-1 items-center gap-5"
             onClick={(e) => e.stopPropagation()}
           >
-              <div className="flex flex-col items-end gap-1.5">
-              <div className="flex items-center gap-1 text-white font-display text-lg">
-                <span className="text-accent">$</span>
-                <span>{formatNumber(state.money)}</span>
+            <div
+              className="flex min-w-0 flex-1 flex-col gap-0.5"
+              title={`Progress toward popularity ${popularityBar.segmentHigh}`}
+            >
+              <div className="flex w-full items-center justify-between gap-2 text-[9px] font-bold font-display uppercase tracking-widest text-zinc-500">
+                <span className="truncate">Popularity</span>
+                <span className="shrink-0 tabular-nums text-gold">{state.popularity}</span>
               </div>
-              <div className="flex w-[min(11rem,52vw)] flex-col items-end gap-1">
-                <div className="flex w-full items-center justify-between gap-2 text-[10px] font-bold font-display uppercase tracking-widest text-zinc-500">
-                  <span>Popularity</span>
-                  <span className="text-gold tabular-nums">{state.popularity}</span>
-                </div>
+              <div className="h-1 w-full overflow-hidden rounded-full bg-zinc-800">
                 <div
-                  className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-800"
-                  title={
-                    popularityBar.segmentHigh >= 100
-                      ? `Reputation ${state.popularity} (max segment)`
-                      : `Progress toward ${popularityBar.segmentHigh} popularity`
-                  }
-                >
-                  <div
-                    className="h-full rounded-full bg-gradient-to-r from-amber-700 to-gold transition-[width] duration-500 ease-out"
-                    style={{ width: `${popularityBar.fillPercent}%` }}
-                  />
-                </div>
+                  className="h-full rounded-full bg-gradient-to-r from-amber-700 to-gold transition-[width] duration-500 ease-out"
+                  style={{ width: `${popularityBar.fillPercent}%` }}
+                />
               </div>
             </div>
-            <button 
-              onClick={() => setIsSettingsOpen(true)}
-              className="p-1 hover:bg-card rounded transition-colors"
-            >
-              <SettingsIcon size={20} />
-            </button>
+            <div className="flex shrink-0 items-center gap-0.5 font-display text-base leading-none text-white tabular-nums">
+              <span className="text-accent">$</span>
+              <span>{formatNumber(state.money)}</span>
+            </div>
           </div>
+          <button
+            type="button"
+            onClick={() => setIsSettingsOpen(true)}
+            className="shrink-0 rounded p-1 transition-colors hover:bg-card"
+          >
+            <SettingsIcon size={18} />
+          </button>
         </header>
 
         {/* Main Content */}
@@ -206,6 +249,7 @@ export default function App() {
               currentView === 'recruiting'
               ? 'flex min-h-0 flex-col overflow-hidden'
               : 'overflow-y-auto pb-24',
+            currentView === 'dashboard' && 'pb-32',
             (currentView === 'roster' || currentView === 'recruiting') && 'pb-24',
           )}
         >
@@ -229,6 +273,29 @@ export default function App() {
             </motion.div>
           </AnimatePresence>
         </main>
+
+        {currentView === 'dashboard' && (
+          <div className="pointer-events-none absolute bottom-20 left-0 right-0 z-30 px-4 pb-3">
+            <button
+              type="button"
+              disabled={mustRunShowBeforeEndDay}
+              title={
+                mustRunShowBeforeEndDay
+                  ? 'Run the booked show tonight; the day advances after the event.'
+                  : undefined
+              }
+              onClick={handleEndDay}
+              className={cn(
+                'pointer-events-auto w-full border border-border bg-zinc-900 py-4 font-display text-lg uppercase tracking-tighter text-white shadow-lg transition-colors',
+                mustRunShowBeforeEndDay
+                  ? 'cursor-not-allowed opacity-45 hover:border-border hover:bg-zinc-900'
+                  : 'hover:border-accent hover:bg-card',
+              )}
+            >
+              END DAY
+            </button>
+          </div>
+        )}
 
         {/* Bottom Navigation */}
         <nav

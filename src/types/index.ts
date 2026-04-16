@@ -53,13 +53,20 @@ export type Venue = {
   cost: number;
   multiplier: number;
   minPopularity: number;
+  /** Fire code / building capacity (advance sales cap). */
+  maxAudience: number;
+  /** Base ticket price before buzz surcharge. */
+  baseTicketPrice: number;
 };
 
 export type Show = {
   id: string;
   name: string;
   matches: Match[];
+  /** Gate / advance ticket income for this card (counted toward net profit). */
   revenue: number;
+  /** Tickets sold during prep for this show (same basis as expected audience). */
+  ticketsSoldTotal?: number;
   attendance: number;
   rating: number; // Average of matches
   popularityGain: number;
@@ -109,8 +116,24 @@ export type ActiveRecruit = {
   image: string;
   mentorIds: [string, string];
   daysTrained: number;
-  enlistedAtShow: number;
+  /** Calendar day this rookie was enlisted (legacy saves may only have enlistedAtShow). */
+  enlistedOnDay: number;
   needsTrainingChoice: boolean;
+};
+
+/** Booked card waiting for show day (see currentDay / showDay). */
+export type PlannedShow = {
+  matches: Match[];
+  venueId: string;
+  prepDays: number;
+  /** Game day the show is booked for (inclusive). */
+  showDay: number;
+  /** Calendar day the card was booked (for advance ticket pacing). */
+  bookedOnDay?: number;
+  /** Advance tickets sold toward this show (also the expected audience count). */
+  ticketsSoldTotal?: number;
+  /** Sum of cash earned from advance ticket nights for this card. */
+  advanceTicketRevenueTotal?: number;
 };
 
 export type GameState = {
@@ -121,6 +144,10 @@ export type GameState = {
   activeMarketing: MarketingCampaign[];
   history: Show[];
   currentShowNumber: number;
+  /** Calendar day for daily training / scheduling (1-based). */
+  currentDay: number;
+  /** Null when no card is booked. */
+  upcomingShow: PlannedShow | null;
   lastShowResult?: Show;
   recruitProspects: RecruitProspect[];
   activeRecruits: ActiveRecruit[];
@@ -150,9 +177,11 @@ export type ShowSimulationResult = {
     | 'roster'
     | 'history'
     | 'currentShowNumber'
+    | 'currentDay'
     | 'lastShowResult'
     | 'recruitProspects'
     | 'activeRecruits'
+    | 'upcomingShow'
   >;
 };
 

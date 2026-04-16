@@ -43,8 +43,15 @@ export default function ShowResultModal({ isOpen, onClose, show }: ShowResultMod
             <div className="space-y-6">
               <div className="grid grid-cols-2 gap-4 border-b border-border pb-4">
                 <div>
-                  <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Revenue</p>
-                  <p className="text-xl font-display text-white">{formatCurrency(show.revenue)}</p>
+                  <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Ticket sales</p>
+                  <p className="text-xl font-display text-white tabular-nums">
+                    {formatNumber(show.ticketsSoldTotal ?? 0)}
+                  </p>
+                  {show.revenue > 0 && (
+                    <p className="mt-1 text-[9px] font-bold uppercase tracking-wide text-zinc-500 tabular-nums">
+                      {formatCurrency(show.revenue)}
+                    </p>
+                  )}
                 </div>
                 <div className="text-right">
                   <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Score</p>

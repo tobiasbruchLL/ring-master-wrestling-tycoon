@@ -1,13 +1,45 @@
 import { Fighter, Facility, MarketingCampaign, Venue } from './types';
 
 export const INITIAL_MONEY = 0;
-export const INITIAL_POPULARITY = 2;
+export const INITIAL_POPULARITY = 1;
 
 export const VENUES: Venue[] = [
-  { id: 'backyard', name: 'Backyard', cost: 0, multiplier: 1, minPopularity: 0 },
-  { id: 'gym', name: 'High School Gym', cost: 500, multiplier: 1.5, minPopularity: 5 },
-  { id: 'club', name: 'Nightclub', cost: 1500, multiplier: 2.5, minPopularity: 15 },
-  { id: 'arena', name: 'City Arena', cost: 5000, multiplier: 5, minPopularity: 40 },
+  {
+    id: 'backyard',
+    name: 'Backyard',
+    cost: 0,
+    multiplier: 1,
+    minPopularity: 0,
+    maxAudience: 75,
+    baseTicketPrice: 10,
+  },
+  {
+    id: 'gym',
+    name: 'High School Gym',
+    cost: 500,
+    multiplier: 1.5,
+    minPopularity: 5,
+    maxAudience: 420,
+    baseTicketPrice: 16,
+  },
+  {
+    id: 'club',
+    name: 'Nightclub',
+    cost: 1500,
+    multiplier: 2.5,
+    minPopularity: 15,
+    maxAudience: 1100,
+    baseTicketPrice: 26,
+  },
+  {
+    id: 'arena',
+    name: 'City Arena',
+    cost: 5000,
+    multiplier: 5,
+    minPopularity: 40,
+    maxAudience: 5200,
+    baseTicketPrice: 42,
+  },
 ];
 
 export const STARTING_FIGHTERS: Fighter[] = [
