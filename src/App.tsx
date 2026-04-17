@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Trophy, Users, Building2, Settings as SettingsIcon, UserPlus } from 'lucide-react';
 import { useGameState, getPlannedShowRunBlockReason, isPlannedShowRunnableNow } from './hooks/useGameState';
 import { cn, formatNumber } from './lib/utils';
-import { getPromotionPopularityBar } from './lib/promotionPopularity';
+import { getPromotionPopularityBar, promotionTier } from './lib/promotionPopularity';
 
 // Components
 import Dashboard from './features/Dashboard';
@@ -234,7 +234,7 @@ export default function App() {
             >
               <div className="flex w-full items-center justify-between gap-2 text-[9px] font-bold font-display uppercase tracking-widest text-zinc-500">
                 <span className="truncate">Popularity</span>
-                <span className="shrink-0 tabular-nums text-gold">{state.popularity}</span>
+                <span className="shrink-0 tabular-nums text-gold">{promotionTier(state.popularity)}</span>
               </div>
               <div className="h-1 w-full overflow-hidden rounded-full bg-zinc-800">
                 <div

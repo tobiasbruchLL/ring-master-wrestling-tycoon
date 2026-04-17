@@ -72,6 +72,7 @@ export type Show = {
   ticketsSoldTotal?: number;
   attendance: number;
   rating: number; // Average of matches
+  /** Change applied to `GameState.popularity` for this show (fractional = bar fill toward next tier). */
   popularityGain: number;
   /** Target show rating (1–5) for promotion popularity when the show ran; absent on older saves. */
   expectedShowRating?: number;
@@ -141,6 +142,7 @@ export type PlannedShow = {
 
 export type GameState = {
   money: number;
+  /** Promotion tier + fractional progress toward the next tier (e.g. 5.3 ≈ tier 5, bar ~30% full). Minimum 1. */
   popularity: number;
   roster: Fighter[];
   /** False only on a brand-new save before the opening draft (five picks) finishes. */

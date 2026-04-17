@@ -35,7 +35,11 @@ import {
   RECRUIT_TRAINING_INJURY_ROLL,
   RECRUIT_TRAINING_LOW_ENERGY_THRESHOLD,
 } from '../lib/recruitTraining';
-import { computePromotionPopularityDelta } from '../lib/promotionPopularity';
+import {
+  clampPromotionPopularity,
+  computePromotionPopularityDelta,
+  promotionTier,
+} from '../lib/promotionPopularity';
 import { computeShowPrepDays } from '../lib/showScheduling';
 import { computeMatchScoreBreakdown } from '../lib/matchScoring';
 import { matchSetupCostAtIndex } from '../lib/showEconomy';
@@ -243,7 +247,7 @@ function computeShowSimulation(
     showRating,
     prev.popularity,
   );
-  const nextPromotionPopularity = Math.max(0, prev.popularity + popularityGain);
+  const nextPromotionPopularity = clampPromotionPopularity(prev.popularity + popularityGain);
 
   const newShow: Show = {
     id: Math.random().toString(36).substr(2, 9),
@@ -379,7 +383,7 @@ function plannedShowMatchesSame(a: Match[], b: Match[]): boolean {
 
 function rollRecruitProspect(popularity: number): RecruitProspect {
   const name = `${FIGHTER_NAMES[Math.floor(Math.random() * FIGHTER_NAMES.length)]} Jr`;
-  const rep = Math.max(0, popularity);
+  const rep = promotionTier(popularity);
   const repFactor = Math.min(1.35, 0.38 + rep * 0.022);
   const rollStat = () => {
     const base = 16 + Math.random() * 34;
@@ -561,7 +565,7 @@ export function getPlannedShowRunBlockReason(state: GameState): string | null {
   if (state.currentDay < plan.showDay) return 'Show is not booked for today yet.';
 
   const venue = VENUES.find((v) => v.id === plan.venueId) || VENUES[0];
-  if (state.popularity < venue.minPopularity) {
+  if (promotionTier(state.popularity) < venue.minPopularity) {
     return `Need ${venue.minPopularity} popularity for ${venue.name}.`;
   }
 
@@ -659,7 +663,7 @@ export function useGameState() {
   }, [state]);
 
   const generateRandomFighter = useCallback((): Fighter => {
-    const name = FIGHTER_NAMES[Math.floor(Math.random() * FIGHTER_NAMES.length)] + ' ' + Math.floor(Math.random() * 100);
+    const name = FIGHTER_NAMES[Math.floor(Math.random() * FIGHTER_NAMES.length)];
     const stats = {
       strength: Math.floor(Math.random() * 60) + 20,
       charisma: Math.floor(Math.random() * 60) + 20,

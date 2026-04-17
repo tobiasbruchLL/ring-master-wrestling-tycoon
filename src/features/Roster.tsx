@@ -1,5 +1,5 @@
-import { useState, useEffect, ReactNode } from 'react';
-import { motion } from 'motion/react';
+import { Fragment, useState, useEffect, ReactNode } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { Trash2, Users } from 'lucide-react';
 import { GameState, Fighter } from '../types';
 import { cn, formatCurrency, fighterPower } from '../lib/utils';
@@ -16,9 +16,11 @@ export default function Roster({ state, onHire, onFire, generateFighter }: Roste
   const [tab, setTab] = useState<'current' | 'hire'>('current');
   const [candidates] = useState<Fighter[]>(() => Array.from({ length: 3 }, generateFighter));
   const [detailFighter, setDetailFighter] = useState<Fighter | null>(null);
+  const [releaseConfirm, setReleaseConfirm] = useState<Fighter | null>(null);
 
   useEffect(() => {
     setDetailFighter(null);
+    setReleaseConfirm(null);
   }, [tab]);
 
   useEffect(() => {
@@ -26,6 +28,13 @@ export default function Roster({ state, onHire, onFire, generateFighter }: Roste
       if (!prev) return prev;
       const onRoster = state.roster.some((f) => f.id === prev.id);
       if (!onRoster) return prev;
+      const fresh = state.roster.find((f) => f.id === prev.id);
+      return fresh ?? null;
+    });
+    setReleaseConfirm((prev) => {
+      if (!prev) return prev;
+      const onRoster = state.roster.some((f) => f.id === prev.id);
+      if (!onRoster) return null;
       const fresh = state.roster.find((f) => f.id === prev.id);
       return fresh ?? null;
     });
@@ -47,7 +56,7 @@ export default function Roster({ state, onHire, onFire, generateFighter }: Roste
                     onClick={(e) => {
                       e.stopPropagation();
                       if (detailFighter?.id === fighter.id) setDetailFighter(null);
-                      onFire(fighter.id);
+                      setReleaseConfirm(fighter);
                     }}
                     className="p-2 text-zinc-600 hover:text-accent transition-colors"
                     aria-label={`Release ${fighter.name}`}
@@ -121,6 +130,58 @@ export default function Roster({ state, onHire, onFire, generateFighter }: Roste
         fighter={detailFighter}
         onClose={() => setDetailFighter(null)}
       />
+
+      <AnimatePresence>
+        {releaseConfirm && (
+          <Fragment key={releaseConfirm.id}>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setReleaseConfirm(null)}
+              className="fixed inset-0 z-[160] bg-black/95 backdrop-blur-sm"
+            />
+            <motion.div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="release-confirm-title"
+              initial={{ scale: 0.92, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.92, opacity: 0 }}
+              className="fixed left-1/2 top-1/2 z-[161] w-full max-w-xs -translate-x-1/2 -translate-y-1/2 border-4 border-accent bg-bg p-6 shadow-2xl"
+            >
+              <p
+                id="release-confirm-title"
+                className="text-center font-display text-xl uppercase leading-tight text-white"
+              >
+                Release {releaseConfirm.name}?
+              </p>
+              <p className="mt-3 text-center text-[11px] text-zinc-500">
+                They leave your roster for good. You can hire new talent later, but this fighter is gone.
+              </p>
+              <div className="mt-6 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setReleaseConfirm(null)}
+                  className="flex-1 border border-border bg-card py-3 font-display text-xs uppercase tracking-tighter text-zinc-300 transition-colors hover:bg-white/[0.06] hover:text-white"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onFire(releaseConfirm.id);
+                    setReleaseConfirm(null);
+                  }}
+                  className="flex-1 bg-accent py-3 font-display text-xs uppercase tracking-tighter text-white transition-colors hover:brightness-110"
+                >
+                  Release
+                </button>
+              </div>
+            </motion.div>
+          </Fragment>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -141,7 +202,7 @@ function FighterCard({ fighter, action, onSelect }: FighterCardProps) {
         <img 
           src={fighter.image} 
           alt={fighter.name} 
-          className="w-16 h-16 rounded-none object-contain border border-border"
+          className="h-24 w-24 rounded-none object-contain"
           referrerPolicy="no-referrer"
         />
       </div>

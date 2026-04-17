@@ -12,8 +12,7 @@ function rollLowStatValue(): number {
 }
 
 function rollName(): string {
-  const base = FIGHTER_NAMES[Math.floor(Math.random() * FIGHTER_NAMES.length)];
-  return `${base} ${Math.floor(Math.random() * 900 + 100)}`;
+  return FIGHTER_NAMES[Math.floor(Math.random() * FIGHTER_NAMES.length)];
 }
 
 function rollTrait(): FighterTrait {

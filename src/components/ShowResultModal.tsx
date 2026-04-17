@@ -15,8 +15,14 @@ export default function ShowResultModal({ isOpen, onClose, show }: ShowResultMod
   const expectedScore =
     show.expectedShowRating !== undefined ? showScoreFromRating(show.expectedShowRating) : null;
   const popDelta = show.popularityGain;
-  const popLabel =
-    popDelta > 0 ? `+${popDelta}` : popDelta < 0 ? `-${Math.abs(popDelta)}` : '±0';
+  const popLabel = (() => {
+    if (popDelta === 0) return '±0';
+    const legacyWholeTier = Number.isInteger(popDelta) && Math.abs(popDelta) >= 1;
+    if (legacyWholeTier) {
+      return popDelta > 0 ? `+${popDelta}` : `−${Math.abs(popDelta)}`;
+    }
+    return `${popDelta > 0 ? '+' : '−'}${Math.round(Math.abs(popDelta) * 100)}%`;
+  })();
 
   return (
     <AnimatePresence>

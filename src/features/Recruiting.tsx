@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { UserPlus, X, GraduationCap } from 'lucide-react';
 import { GameState, RecruitProspect, Fighter, getRecruitSlotCap } from '../types';
 import { cn } from '../lib/utils';
+import { promotionTier } from '../lib/promotionPopularity';
 
 interface RecruitingProps {
   state: GameState;
@@ -49,7 +50,7 @@ export default function Recruiting({ state, onDismissProspect, onEnlist }: Recru
   };
 
   const repLabel = useMemo(() => {
-    const p = state.popularity;
+    const p = promotionTier(state.popularity);
     if (p < 8) return 'Regional';
     if (p < 20) return 'Growing';
     if (p < 40) return 'National buzz';
@@ -64,7 +65,8 @@ export default function Recruiting({ state, onDismissProspect, onEnlist }: Recru
           Recruiting <span className="text-accent">&amp;</span> dev
         </h2>
         <p className="text-xs text-zinc-500 font-bold uppercase tracking-widest">
-          Slots {state.activeRecruits.length}/{cap} · Reputation tier: {repLabel} · POPULARITY {state.popularity}
+          Slots {state.activeRecruits.length}/{cap} · Reputation tier: {repLabel} · POPULARITY{' '}
+          {promotionTier(state.popularity)}
         </p>
       </section>
 
