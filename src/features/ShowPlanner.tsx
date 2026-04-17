@@ -1,29 +1,34 @@
 import { useState, useRef, useCallback, useEffect, useLayoutEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Plus, X, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, X, AlertCircle, ChevronLeft, ChevronRight, Info } from 'lucide-react';
 import { GameState, Match, Fighter, Show } from '../types';
-import { cn, formatCurrency, formatNumber, fighterPower } from '../lib/utils';
-import { computeShowPrepDays } from '../lib/showScheduling';
-import { matchSetupCostAtIndex, maxMatchesForVenue } from '../lib/showEconomy';
+import { cn, formatCurrency, formatNumber, fighterOverallRating } from '../lib/utils';
+import {
+  averageCardExcitement,
+  effectiveTicketUnitPrice,
+  matchSetupCostAtIndex,
+  maxMatchesForVenue,
+} from '../lib/showEconomy';
 import { VENUES } from '../constants';
 import { promotionTier } from '../lib/promotionPopularity';
+import {
+  computeTicketSalesMatchupBreakdown,
+  type MatchScoreBreakdown,
+} from '../lib/matchScoring';
 
 interface ShowPlannerProps {
   state: GameState;
   onScheduleShow: (matches: Match[], venueId: string) => void;
   onCancel: () => void;
-  calculateMatchScore: (match: Match, roster: Fighter[], history: Show[]) => { 
-    popularityA: number, 
-    popularityB: number, 
-    multipliers: { label: string, value: number }[], 
-    totalScore: number,
-    projectedStars: number 
-  } | null;
+  onToast: (message: string) => void;
 }
 
 function createEmptyMatch(): Match {
   return { id: Math.random().toString(), fighterAId: '', fighterBId: '' };
 }
+
+/** Ticket draw line items — keep in the expected-sales details modal, not as picker chips. */
+const PAIRING_LIST_HIDDEN_ADDITIVE_LABELS = new Set(['Popularity', 'Combined wrestler popularity']);
 
 /** Short uppercase text for buzz modifier badges (matches `matchScoring` labels). */
 function pairingMultiplierBadgeLabel(label: string): string {
@@ -34,13 +39,242 @@ function pairingMultiplierBadgeLabel(label: string): string {
     .toUpperCase();
 }
 
+/** Full-width pick row; layout mirrors onboarding draft halves (see `OnboardingDraftOverlay`). */
+function PlannerMatchFighterRow({
+  fighter,
+  placement,
+  onClick,
+  active,
+}: {
+  fighter?: Fighter;
+  placement: 'first' | 'second';
+  onClick: () => void;
+  active: boolean;
+}) {
+  const imageOnLeft = placement === 'first';
+  const ovr = fighter ? fighterOverallRating(fighter.stats) : 0;
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'relative flex min-h-[8.25rem] w-full overflow-hidden text-left transition-colors',
+        active ? 'ring-1 ring-accent ring-inset' : '',
+        fighter ? 'border border-border bg-card hover:brightness-[1.02]' : 'border border-dashed border-border bg-card/40 hover:border-accent',
+      )}
+    >
+      {imageOnLeft ? (
+        <>
+          <div
+            className="pointer-events-none absolute inset-y-0 left-0 w-[48%] bg-gradient-to-br from-zinc-900 via-zinc-950 to-black/55"
+            aria-hidden
+          />
+          <div
+            className="pointer-events-none absolute inset-y-0 left-[48%] right-0 bg-gradient-to-tr from-zinc-950/95 via-zinc-900/40 to-zinc-950/80"
+            aria-hidden
+          />
+        </>
+      ) : (
+        <>
+          <div
+            className="pointer-events-none absolute inset-y-0 right-0 w-[48%] bg-gradient-to-bl from-zinc-950 via-zinc-900 to-black/55"
+            aria-hidden
+          />
+          <div
+            className="pointer-events-none absolute inset-y-0 left-0 right-[48%] bg-gradient-to-tl from-zinc-900/95 via-zinc-950/50 to-zinc-900/80"
+            aria-hidden
+          />
+        </>
+      )}
+      <div
+        className={cn(
+          'relative z-10 flex min-h-[8.25rem] w-full flex-row items-stretch',
+          !imageOnLeft && 'flex-row-reverse',
+        )}
+      >
+        <div
+          className={cn(
+            'relative flex min-h-0 w-[min(48%,12rem)] shrink-0 items-end bg-transparent',
+            imageOnLeft ? 'justify-start pl-1 pr-0.5' : 'justify-end pl-0.5 pr-1',
+          )}
+        >
+          {fighter ? (
+            <img
+              src={fighter.image}
+              alt=""
+              className={cn(
+                'max-h-[9.5rem] min-h-[6rem] w-full max-w-none object-contain',
+                imageOnLeft
+                  ? 'object-left object-bottom'
+                  : 'object-right object-bottom -scale-x-100',
+              )}
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            <div
+              className={cn(
+                'flex min-h-[6.5rem] w-full items-center justify-center pb-2',
+                imageOnLeft ? 'pl-1' : 'pr-1',
+              )}
+            >
+              <Plus size={28} className="text-zinc-600" />
+            </div>
+          )}
+        </div>
+        <div className="flex min-w-0 flex-1 flex-col justify-center gap-1 bg-transparent px-3 py-3">
+          {fighter ? (
+            <>
+              <div className="flex items-start justify-between gap-2">
+                <h3 className="text-balance font-display text-base uppercase leading-tight tracking-tight text-white">
+                  {fighter.name}
+                </h3>
+                <span
+                  className={cn(
+                    'shrink-0 border px-1.5 py-0.5 text-[8px] font-display uppercase tracking-widest',
+                    fighter.alignment === 'Face'
+                      ? 'border-blue-400/40 text-blue-400'
+                      : 'border-accent/40 text-accent',
+                  )}
+                >
+                  {fighter.alignment}
+                </span>
+              </div>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">{fighter.trait}</p>
+              <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px] font-bold uppercase tracking-tight text-zinc-400">
+                <span>💥 PWR {fighter.stats.power}</span>
+                <span>⚡ TEC {fighter.stats.technique}</span>
+                <span>🛡️ END {fighter.stats.endurance}</span>
+                <span>🎤 MIC {fighter.stats.mic}</span>
+              </div>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
+                OVR {ovr} · Pop {fighter.popularity}
+              </p>
+              <div className="flex items-center gap-2">
+                <div className="h-0.5 w-14 bg-zinc-800">
+                  <div className="h-full bg-accent" style={{ width: `${fighter.energy}%` }} />
+                </div>
+                <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                  Energy {fighter.energy}%
+                </span>
+              </div>
+            </>
+          ) : (
+            <div className="flex h-full flex-col justify-center gap-1">
+              <span className="font-display text-xs uppercase tracking-wide text-zinc-500">Open slot</span>
+              <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-600">Tap to select</span>
+            </div>
+          )}
+        </div>
+      </div>
+    </button>
+  );
+}
+
 type PlannerStep = 'venue' | 'matches';
 
-export default function ShowPlanner({ state, onScheduleShow, onCancel, calculateMatchScore }: ShowPlannerProps) {
+function PlannerTicketSalesBreakdownModal({
+  breakdown,
+  matchNumber,
+  onClose,
+}: {
+  breakdown: MatchScoreBreakdown;
+  matchNumber: number;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <motion.div
+      role="dialog"
+      aria-modal
+      aria-labelledby="planner-ticket-sales-info-title"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="absolute inset-0 z-[48] flex flex-col justify-end bg-black/65 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:justify-center"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ y: 16, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        exit={{ y: 16, opacity: 0 }}
+        transition={{ type: 'spring', damping: 28, stiffness: 320 }}
+        className="mx-auto w-full max-w-sm rounded-lg border border-border bg-card shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
+          <h3
+            id="planner-ticket-sales-info-title"
+            className="text-left font-display text-sm uppercase leading-tight tracking-wide text-white"
+          >
+            Expected ticket sales · Match {matchNumber}
+          </h3>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="shrink-0 rounded border border-border p-1.5 text-zinc-400 transition-colors hover:border-accent hover:text-white"
+          >
+            <X className="size-4" strokeWidth={1.75} />
+          </button>
+        </div>
+        <div className="max-h-[min(52vh,22rem)] space-y-2 overflow-y-auto px-4 py-3 text-left">
+          {breakdown.additiveBonuses.length > 0 ? (
+            breakdown.additiveBonuses.map((a, aIdx) => (
+              <div
+                key={`${a.label}-${aIdx}`}
+                className="flex justify-between gap-3 text-[10px] font-display uppercase tracking-widest text-emerald-400"
+              >
+                <span>{a.label}</span>
+                <span className="shrink-0 tabular-nums">+{a.amount}</span>
+              </div>
+            ))
+          ) : (
+            <div className="flex justify-between gap-3 text-[10px] font-display uppercase tracking-widest text-zinc-500">
+              <span>Popularity draw (base)</span>
+              <span className="shrink-0 tabular-nums text-white">
+                {breakdown.fighterPopularityA + breakdown.fighterPopularityB}
+              </span>
+            </div>
+          )}
+          {breakdown.multipliers.map((m, mIdx) => (
+            <div
+              key={`${m.label}-${mIdx}`}
+              className={cn(
+                'flex justify-between gap-3 text-[10px] font-display uppercase tracking-widest',
+                m.value > 1 && 'text-emerald-400',
+                m.value < 1 && 'text-red-400',
+                m.value === 1 && 'text-gold',
+              )}
+            >
+              <span>{m.label}</span>
+              <span className="shrink-0 tabular-nums">×{m.value}</span>
+            </div>
+          ))}
+          <div className="flex justify-between gap-3 border-t border-border pt-2 text-xs font-display uppercase tracking-[2px] text-accent">
+            <span>Expected ticket sales</span>
+            <span className="font-bold tabular-nums">{formatNumber(breakdown.totalScore)}</span>
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+export default function ShowPlanner({ state, onScheduleShow, onCancel, onToast }: ShowPlannerProps) {
   const [plannerStep, setPlannerStep] = useState<PlannerStep>('venue');
   const [matches, setMatches] = useState<Match[]>(() => [createEmptyMatch()]);
   const [selectedVenueId, setSelectedVenueId] = useState<string>(VENUES[0].id);
   const [selectingFor, setSelectingFor] = useState<{ matchIndex: number, side: 'A' | 'B' } | null>(null);
+  const [showScheduleConfirm, setShowScheduleConfirm] = useState(false);
+  const [ticketSalesInfoIdx, setTicketSalesInfoIdx] = useState<number | null>(null);
   const [activeSlide, setActiveSlide] = useState(0);
   const carouselRef = useRef<HTMLDivElement>(null);
   const prevMatchCount = useRef(matches.length);
@@ -97,10 +331,25 @@ export default function ShowPlanner({ state, onScheduleShow, onCancel, calculate
     setMatches((m) => (m.length > matchCap ? m.slice(0, matchCap) : m));
   }, [matchCap]);
 
-  const addMatch = () => {
-    if (matches.length < matchCap) {
-      setMatches([...matches, createEmptyMatch()]);
+  useEffect(() => {
+    if (plannerStep === 'venue' || selectingFor) setTicketSalesInfoIdx(null);
+  }, [plannerStep, selectingFor]);
+
+  useEffect(() => {
+    if (ticketSalesInfoIdx !== null && ticketSalesInfoIdx >= matches.length) {
+      setTicketSalesInfoIdx(null);
     }
+  }, [matches.length, ticketSalesInfoIdx]);
+
+  const addMatch = () => {
+    if (matches.length >= matchCap) return;
+    const bookableCount = state.roster.filter((f) => !f.recoveringFromInjury).length;
+    const neededForCard = 2 * (matches.length + 1);
+    if (bookableCount < neededForCard) {
+      onToast('Not enough fighters.');
+      return;
+    }
+    setMatches([...matches, createEmptyMatch()]);
   };
 
   const removeMatch = (index: number) => {
@@ -140,12 +389,18 @@ export default function ShowPlanner({ state, onScheduleShow, onCancel, calculate
     matches.every((m) => m.fighterAId && m.fighterBId) &&
     canAfford &&
     !hasRecoveringOnCard;
-  const totalBuzzPreview = matches.reduce((sum, m) => {
+  const totalExpectedTicketSalesPreview = matches.reduce((sum, m) => {
     if (!m.fighterAId || !m.fighterBId) return sum;
-    const breakdown = calculateMatchScore(m, state.roster, state.history);
+    const breakdown = computeTicketSalesMatchupBreakdown(m, state.roster, state.history, state.popularity);
     return breakdown ? sum + breakdown.totalScore : sum;
   }, 0);
-  const prepDaysPreview = computeShowPrepDays(matches.length, selectedVenueId);
+  const expectedTicketUnitPrice = effectiveTicketUnitPrice(
+    selectedVenue,
+    averageCardExcitement(matches, state.roster, state.history, state.popularity),
+    state.ticketPriceUpgrades,
+  );
+  const totalExpectedTicketRevenue = Math.min(totalExpectedTicketSalesPreview, selectedVenue.maxAudience) * expectedTicketUnitPrice;
+  const expectedProfit = totalExpectedTicketRevenue - totalCost;
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col bg-bg">
@@ -182,7 +437,8 @@ export default function ShowPlanner({ state, onScheduleShow, onCancel, calculate
                       Cost: {formatCurrency(venue.cost)}
                     </p>
                     <p className="mt-0.5 text-[10px] font-bold uppercase text-zinc-500">
-                      Cap {formatNumber(venue.maxAudience)} · from {formatCurrency(venue.baseTicketPrice)}
+                      Cap {formatNumber(venue.maxAudience)} · from{' '}
+                      {formatCurrency(effectiveTicketUnitPrice(venue, 0, state.ticketPriceUpgrades))}
                     </p>
                     <p className="mt-0.5 text-[10px] font-bold uppercase text-accent">{venue.multiplier}x demand</p>
                     {locked && (
@@ -225,179 +481,132 @@ export default function ShowPlanner({ state, onScheduleShow, onCancel, calculate
       <div className="min-h-0 flex-1 overflow-y-auto p-8 pb-4">
         <div className="space-y-12">
         <div className="space-y-4">
-          <div className="flex items-center gap-3">
-            <span className="text-[10px] font-display text-gold uppercase tracking-widest">
-              Matches: {matches.length}/{matchCap}
-            </span>
-            <div className="h-px bg-border flex-1" />
-          </div>
-
-          <div className="relative">
-            <button
-              type="button"
-              aria-label="Previous match"
-              onClick={() => scrollToSlide(activeSlide - 1)}
-              disabled={activeSlide <= 0}
-              className={cn(
-                'absolute -left-2 top-1/2 z-10 flex h-9 w-9 -translate-y-1/2 items-center justify-center border border-border bg-bg/90 text-zinc-400 transition-colors',
-                activeSlide <= 0 ? 'pointer-events-none opacity-30' : 'hover:border-accent hover:text-white'
-              )}
-            >
-              <ChevronLeft size={18} />
-            </button>
-            <button
-              type="button"
-              aria-label="Next match"
-              onClick={() => scrollToSlide(activeSlide + 1)}
-              disabled={activeSlide >= slideCount - 1}
-              className={cn(
-                'absolute -right-2 top-1/2 z-10 flex h-9 w-9 -translate-y-1/2 items-center justify-center border border-border bg-bg/90 text-zinc-400 transition-colors',
-                activeSlide >= slideCount - 1 ? 'pointer-events-none opacity-30' : 'hover:border-accent hover:text-white'
-              )}
-            >
-              <ChevronRight size={18} />
-            </button>
-
-            <div
-              ref={carouselRef}
-              onScroll={handleCarouselScroll}
-              className={cn(
-                'flex snap-x snap-mandatory overflow-x-auto scroll-smooth [-ms-overflow-style:none] [scrollbar-width:none]',
-                '[&::-webkit-scrollbar]:hidden'
-              )}
-            >
-              {matches.map((match, idx) => (
-                <div
-                  key={match.id}
-                  className="w-full min-w-full shrink-0 snap-start space-y-6 px-5"
-                >
-                  <div className="relative">
-                    {idx > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => removeMatch(idx)}
-                        className="absolute right-1 top-1 z-20 flex h-6 w-6 items-center justify-center bg-accent text-white"
-                        aria-label={`Remove match ${idx + 1}`}
-                      >
-                        <X size={12} />
-                      </button>
-                    )}
-
-                    <div className="flex items-center justify-between gap-4">
-                      <FighterSlot
-                        fighter={state.roster.find((f) => f.id === match.fighterAId)}
-                        onClick={() => setSelectingFor({ matchIndex: idx, side: 'A' })}
-                        active={selectingFor?.matchIndex === idx && selectingFor?.side === 'A'}
-                        align="right"
-                      />
-
-                      <div className="flex shrink-0 flex-col items-center gap-1">
-                        <div className="font-display text-2xl text-accent italic -rotate-12">VS</div>
-                      </div>
-
-                      <FighterSlot
-                        fighter={state.roster.find((f) => f.id === match.fighterBId)}
-                        onClick={() => setSelectingFor({ matchIndex: idx, side: 'B' })}
-                        active={selectingFor?.matchIndex === idx && selectingFor?.side === 'B'}
-                        align="left"
-                      />
-                    </div>
-
-                    {match.fighterAId && match.fighterBId && (() => {
-                      const breakdown = calculateMatchScore(match, state.roster, state.history);
-                      if (!breakdown) return null;
-                      return (
-                        <div className="mt-6 space-y-2 border border-border/50 bg-card/50 p-4">
-                          <div className="flex justify-between text-[10px] font-display uppercase tracking-widest text-zinc-500">
-                            <span>Fighter Popularity</span>
-                            <span className="text-white">
-                              +{breakdown.popularityA + breakdown.popularityB}
-                            </span>
-                          </div>
-                          {breakdown.multipliers.map((m, mIdx) => (
-                            <div
-                              key={mIdx}
-                              className={cn(
-                                'flex justify-between text-[10px] font-display uppercase tracking-widest',
-                                m.value > 1 && 'text-emerald-400',
-                                m.value < 1 && 'text-red-400',
-                                m.value === 1 && 'text-gold',
-                              )}
-                            >
-                              <span>{m.label}</span>
-                              <span>*{m.value}</span>
-                            </div>
-                          ))}
-                          <div className="flex justify-between border-t border-border/50 pt-2 text-xs font-display uppercase tracking-[2px] text-accent">
-                            <span>Generated Buzz</span>
-                            <span className="font-bold">{breakdown.totalScore}</span>
-                          </div>
-                          <div className="flex justify-between border-t border-border/50 pt-2 text-xs font-display uppercase tracking-[2px] text-zinc-500">
-                            <span>Match cost</span>
-                            <span className="font-bold text-white">
-                              {formatCurrency(matchSetupCostAtIndex(selectedVenueId, idx))}
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    })()}
-                  </div>
+          <div
+            ref={carouselRef}
+            onScroll={handleCarouselScroll}
+            className={cn(
+              'flex snap-x snap-mandatory overflow-x-auto scroll-smooth [-ms-overflow-style:none] [scrollbar-width:none]',
+              '[&::-webkit-scrollbar]:hidden'
+            )}
+          >
+            {matches.map((match, idx) => (
+              <div
+                key={match.id}
+                className="w-full min-w-full shrink-0 snap-start space-y-3"
+              >
+                <div className="flex items-start justify-between gap-2 border-b border-border pb-3">
+                  <h2 className="font-display text-lg uppercase tracking-[0.08em] text-white">
+                    Match{' '}
+                    <span className="text-accent">{idx + 1}</span>
+                    <span className="text-zinc-500">/</span>
+                    {slideCount}
+                  </h2>
+                  {idx > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => removeMatch(idx)}
+                      className="flex h-8 w-8 shrink-0 items-center justify-center border border-border bg-card text-zinc-400 transition-colors hover:border-accent hover:text-white"
+                      aria-label={`Remove match ${idx + 1}`}
+                    >
+                      <X size={14} />
+                    </button>
+                  )}
                 </div>
-              ))}
-            </div>
-          </div>
 
-          <div className="flex justify-center gap-2 pt-1" role="tablist" aria-label="Match slides">
-            {Array.from({ length: slideCount }, (_, i) => (
-              <button
-                key={i}
-                type="button"
-                role="tab"
-                aria-selected={i === activeSlide}
-                aria-label={`Match ${i + 1}`}
-                onClick={() => scrollToSlide(i)}
-                className={cn(
-                  'h-1.5 rounded-full transition-all',
-                  i === activeSlide ? 'w-6 bg-accent' : 'w-1.5 bg-zinc-700 hover:bg-zinc-500'
-                )}
-              />
+                <PlannerMatchFighterRow
+                  fighter={state.roster.find((f) => f.id === match.fighterAId)}
+                  placement="first"
+                  onClick={() => setSelectingFor({ matchIndex: idx, side: 'A' })}
+                  active={selectingFor?.matchIndex === idx && selectingFor?.side === 'A'}
+                />
+                <PlannerMatchFighterRow
+                  fighter={state.roster.find((f) => f.id === match.fighterBId)}
+                  placement="second"
+                  onClick={() => setSelectingFor({ matchIndex: idx, side: 'B' })}
+                  active={selectingFor?.matchIndex === idx && selectingFor?.side === 'B'}
+                />
+
+                {match.fighterAId && match.fighterBId && (() => {
+                  const breakdown = computeTicketSalesMatchupBreakdown(
+                    match,
+                    state.roster,
+                    state.history,
+                    state.popularity,
+                  );
+                  if (!breakdown) return null;
+                  return (
+                    <div className="space-y-2 border border-border/50 bg-card/50 p-4">
+                      <div className="flex items-center justify-between gap-2 text-xs font-display uppercase tracking-[2px] text-accent">
+                        <span>Expected ticket sales</span>
+                        <div className="flex shrink-0 items-center gap-1.5">
+                          <span className="font-bold tabular-nums">{formatNumber(breakdown.totalScore)}</span>
+                          <button
+                            type="button"
+                            onClick={() => setTicketSalesInfoIdx(idx)}
+                            aria-haspopup="dialog"
+                            aria-expanded={ticketSalesInfoIdx === idx}
+                            aria-label="How expected ticket sales are calculated"
+                            className="inline-flex size-8 items-center justify-center rounded-full border border-border text-zinc-400 transition-colors hover:border-accent hover:text-accent"
+                          >
+                            <Info className="size-[1.05rem]" strokeWidth={1.75} />
+                          </button>
+                        </div>
+                      </div>
+                      <div className="flex justify-between border-t border-border/50 pt-2 text-xs font-display uppercase tracking-[2px] text-zinc-500">
+                        <span>Match cost</span>
+                        <span className="font-bold text-white">
+                          {formatCurrency(matchSetupCostAtIndex(selectedVenueId, idx))}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
             ))}
           </div>
-
-          {matches.length < matchCap && (
-            <button
-              type="button"
-              onClick={addMatch}
-              className="flex w-full items-center justify-center gap-2 border border-dashed border-border py-4 text-zinc-600 transition-all hover:border-accent hover:text-accent"
-            >
-              <Plus size={20} />
-              <span className="text-[10px] font-display uppercase tracking-widest">Add Match</span>
-            </button>
-          )}
         </div>
         </div>
       </div>
 
-      <div className="shrink-0 border-t border-border bg-bg px-5 py-2 sm:px-8">
-        <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-baseline gap-x-2 text-[10px] font-display uppercase leading-none tracking-wide sm:text-xs sm:tracking-[2px]">
-          <div className="flex min-w-0 items-baseline justify-start gap-1.5 text-accent">
-            <span className="shrink-0">Total Buzz</span>
-            <span className="min-w-0 truncate font-bold tabular-nums">{totalBuzzPreview}</span>
-          </div>
-          <div className="flex shrink-0 items-baseline justify-center gap-1.5 text-gold">
-            <span>Prep Days</span>
-            <span className="font-bold tabular-nums text-white">{prepDaysPreview}</span>
-          </div>
-          <div className="flex min-w-0 items-baseline justify-end gap-1.5 text-zinc-500">
-            <span className="shrink-0">Total Cost</span>
-            <span className="min-w-0 truncate font-bold tabular-nums text-white">{formatCurrency(totalCost)}</span>
-          </div>
-        </div>
-        {!canAfford && matches.length > 0 && (
-          <p className="mt-1 text-center text-[10px] font-bold uppercase text-accent animate-pulse">
-            Insufficient Funds for Show
-          </p>
+      <div className="flex shrink-0 items-center justify-center gap-2 border-t border-border bg-bg px-5 py-3 sm:px-8">
+        <button
+          type="button"
+          aria-label="Previous match"
+          onClick={() => scrollToSlide(activeSlide - 1)}
+          disabled={activeSlide <= 0}
+          className={cn(
+            'flex h-11 w-11 shrink-0 items-center justify-center border border-border bg-card text-zinc-400 transition-colors',
+            activeSlide <= 0
+              ? 'pointer-events-none opacity-30'
+              : 'hover:border-accent hover:text-white',
+          )}
+        >
+          <ChevronLeft size={22} />
+        </button>
+        {matches.length < matchCap && (
+          <button
+            type="button"
+            onClick={addMatch}
+            className="flex h-11 min-w-0 max-w-[11rem] flex-1 items-center justify-center gap-1.5 border border-dashed border-border bg-card/40 px-2 text-zinc-500 transition-all hover:border-accent hover:text-accent sm:max-w-[13rem] sm:px-3"
+          >
+            <Plus size={18} className="shrink-0" />
+            <span className="truncate text-[10px] font-display uppercase tracking-widest">Add Match</span>
+          </button>
         )}
+        <button
+          type="button"
+          aria-label="Next match"
+          onClick={() => scrollToSlide(activeSlide + 1)}
+          disabled={activeSlide >= slideCount - 1}
+          className={cn(
+            'flex h-11 w-11 shrink-0 items-center justify-center border border-border bg-card text-zinc-400 transition-colors',
+            activeSlide >= slideCount - 1
+              ? 'pointer-events-none opacity-30'
+              : 'hover:border-accent hover:text-white',
+          )}
+        >
+          <ChevronRight size={22} />
+        </button>
       </div>
 
       <div className="relative z-30 flex h-16 shrink-0 border-t border-border bg-card">
@@ -411,7 +620,7 @@ export default function ShowPlanner({ state, onScheduleShow, onCancel, calculate
         <button
           type="button"
           disabled={!isValid}
-          onClick={() => onScheduleShow(matches, selectedVenueId)}
+          onClick={() => setShowScheduleConfirm(true)}
           className={cn(
             'flex min-h-0 min-w-0 flex-1 items-center justify-center px-2 font-display text-base uppercase tracking-tighter transition-all sm:text-lg',
             isValid
@@ -422,6 +631,11 @@ export default function ShowPlanner({ state, onScheduleShow, onCancel, calculate
           Schedule Show
         </button>
       </div>
+      {!canAfford && matches.length > 0 && (
+        <p className="shrink-0 border-t border-border bg-bg px-5 py-2 text-center text-[10px] font-bold uppercase text-accent animate-pulse sm:px-8">
+          Insufficient Funds for Show
+        </p>
+      )}
         </>
       )}
 
@@ -456,7 +670,7 @@ export default function ShowPlanner({ state, onScheduleShow, onCancel, calculate
                   selectingFor.side === 'A' ? activeMatch.fighterBId : activeMatch.fighterAId;
                 const pairingPreview =
                   !selected && otherFighterId
-                    ? calculateMatchScore(
+                    ? computeTicketSalesMatchupBreakdown(
                         {
                           id: '__pairing_preview__',
                           fighterAId:
@@ -466,9 +680,14 @@ export default function ShowPlanner({ state, onScheduleShow, onCancel, calculate
                         },
                         state.roster,
                         state.history,
+                        state.popularity,
                       )
                     : null;
-                const pairingBadges = pairingPreview?.multipliers ?? [];
+                const pairingMultBadges = pairingPreview?.multipliers ?? [];
+                const pairingAddBadges = pairingPreview?.additiveBonuses ?? [];
+                const pairingAddBadgesForList = pairingAddBadges.filter(
+                  (a) => !PAIRING_LIST_HIDDEN_ADDITIVE_LABELS.has(a.label),
+                );
 
                 return (
                   <button
@@ -496,7 +715,7 @@ export default function ShowPlanner({ state, onScheduleShow, onCancel, calculate
                         </div>
                         <p className="mt-0.5 text-[10px] font-bold uppercase tracking-widest text-zinc-500">{fighter.trait}</p>
                         <div className="mt-1 flex flex-wrap justify-between gap-x-2 gap-y-0.5 text-[10px] font-bold uppercase text-zinc-500">
-                          <span>POWER {fighterPower(fighter.stats)}</span>
+                          <span>OVR {fighterOverallRating(fighter.stats)}</span>
                           <span>POPULARITY {fighter.popularity}</span>
                         </div>
                         <div className="mt-1 flex items-center gap-2">
@@ -513,9 +732,17 @@ export default function ShowPlanner({ state, onScheduleShow, onCancel, calculate
                       </div>
                       {(lowEnergy || recovering) && <AlertCircle size={16} className="shrink-0 text-accent" />}
                     </div>
-                    {pairingBadges.length > 0 && (
+                    {(pairingMultBadges.length > 0 || pairingAddBadgesForList.length > 0) && (
                       <div className="mt-3 flex flex-wrap gap-1.5 border-t border-border/60 pt-3">
-                        {pairingBadges.map((m, i) => (
+                        {pairingAddBadgesForList.map((a, i) => (
+                          <span
+                            key={`add-${a.label}-${i}`}
+                            className="border border-emerald-400/40 bg-emerald-400/10 px-2 py-1 text-[8px] font-display uppercase tracking-widest text-emerald-400"
+                          >
+                            {pairingMultiplierBadgeLabel(a.label)}
+                          </span>
+                        ))}
+                        {pairingMultBadges.map((m, i) => (
                           <span
                             key={`${m.label}-${i}`}
                             className={cn(
@@ -537,47 +764,94 @@ export default function ShowPlanner({ state, onScheduleShow, onCancel, calculate
           </motion.div>
         )}
       </AnimatePresence>
+
+      <AnimatePresence>
+        {ticketSalesInfoIdx !== null &&
+          (() => {
+            const m = matches[ticketSalesInfoIdx];
+            const bd =
+              m?.fighterAId && m?.fighterBId
+                ? computeTicketSalesMatchupBreakdown(m, state.roster, state.history, state.popularity)
+                : null;
+            if (!bd) return null;
+            return (
+              <PlannerTicketSalesBreakdownModal
+                breakdown={bd}
+                matchNumber={ticketSalesInfoIdx + 1}
+                onClose={() => setTicketSalesInfoIdx(null)}
+              />
+            );
+          })()}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showScheduleConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-[60] flex items-end bg-black/65 p-4 sm:items-center sm:justify-center"
+          >
+            <motion.div
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 20, opacity: 0 }}
+              className="w-full border border-border bg-card p-5 sm:max-w-md sm:p-6"
+            >
+              <p className="text-xs font-display uppercase tracking-[0.18em] text-accent">Schedule Show</p>
+              <p className="mt-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                Confirm this booking before locking in the card.
+              </p>
+
+              <div className="mt-4 space-y-2 border-t border-border pt-4 text-[11px] font-display uppercase tracking-widest">
+                <div className="flex items-center justify-between text-zinc-300">
+                  <span>Total Expected Ticket Sales</span>
+                  <span className="font-bold text-white">{formatNumber(totalExpectedTicketSalesPreview)}</span>
+                </div>
+                <div className="flex items-center justify-between text-zinc-300">
+                  <span>Total Expected Ticket Revenue</span>
+                  <span className="font-bold text-white">{formatCurrency(totalExpectedTicketRevenue)}</span>
+                </div>
+                <div className="flex items-center justify-between text-zinc-300">
+                  <span>Total Cost</span>
+                  <span className="font-bold text-white">{formatCurrency(totalCost)}</span>
+                </div>
+                <div className="flex items-center justify-between border-t border-border pt-3 text-zinc-200">
+                  <span>Expected Profit</span>
+                  <span
+                    className={cn(
+                      'font-bold',
+                      expectedProfit >= 0 ? 'text-emerald-400' : 'text-red-400',
+                    )}
+                  >
+                    {formatCurrency(expectedProfit)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="mt-5 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowScheduleConfirm(false)}
+                  className="border border-border bg-bg px-3 py-3 text-[10px] font-display uppercase tracking-widest text-zinc-400 transition-colors hover:border-accent hover:text-white"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onScheduleShow(matches, selectedVenueId);
+                    setShowScheduleConfirm(false);
+                  }}
+                  className="bg-white px-3 py-3 text-[10px] font-display uppercase tracking-widest text-black transition-colors hover:bg-accent hover:text-white"
+                >
+                  Confirm
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
-
-function FighterSlot({ fighter, onClick, active, align }: { 
-  fighter?: Fighter, 
-  onClick: () => void, 
-  active: boolean,
-  align: 'left' | 'right'
-}) {
-  return (
-    <button 
-      onClick={onClick}
-      className={cn(
-        "flex-1 h-36 border flex flex-col items-center justify-center gap-2 transition-all relative",
-        active ? "border-accent bg-accent/5" : "border-border bg-bg hover:border-accent",
-        fighter ? "border-border" : "border-dashed",
-        !fighter && (align === 'right' ? "text-right" : "text-left")
-      )}
-    >
-      {fighter ? (
-        <div className="flex h-full w-full min-h-0 flex-col items-center justify-center gap-1 px-1 py-1">
-          <div className={cn(align === 'left' && '-scale-x-100')}>
-            <img
-              src={fighter.image}
-              alt=""
-              className="h-24 w-24 shrink-0 rounded-none object-contain"
-              referrerPolicy="no-referrer"
-            />
-          </div>
-          <p className="line-clamp-2 w-full text-center text-[10px] font-display uppercase leading-tight text-white">
-            {fighter.name}
-          </p>
-        </div>
-      ) : (
-        <div className="flex flex-col items-center gap-1">
-          <Plus size={16} className="text-zinc-700" />
-          <span className="text-[8px] font-display uppercase tracking-widest text-zinc-600">Select</span>
-        </div>
-      )}
-    </button>
-  );
-}
-

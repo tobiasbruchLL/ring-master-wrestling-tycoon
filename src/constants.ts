@@ -3,6 +3,27 @@ import { Fighter, Facility, MarketingCampaign, Venue } from './types';
 export const INITIAL_MONEY = 0;
 export const INITIAL_POPULARITY = 1;
 
+/**
+ * Mean match score fans expect at each whole promotion popularity tier (index 0 = tier 1 → 80).
+ * Higher tiers reuse the last value (cap).
+ */
+export const EXPECTED_AVERAGE_MATCH_SCORE_BY_POPULARITY_TIER: readonly number[] = [
+  80, 95, 110, 125, 140, 155, 170, 185, 200, 215, 230, 245, 260, 275, 290, 305, 320, 335, 350, 365, 380,
+  395,
+];
+
+export function expectedAverageMatchScoreForPopularityTier(tier: number): number {
+  const t = Math.max(1, Math.floor(tier));
+  const table = EXPECTED_AVERAGE_MATCH_SCORE_BY_POPULARITY_TIER;
+  return table[Math.min(t - 1, table.length - 1)];
+}
+
+/** Multiplier applied to `GameState.popularity` when ending a day with no card booked. */
+export const NO_SHOW_DAY_POPULARITY_FACTOR = 0.9;
+
+/** Buzz multiplier when the match includes at least one fighter on their first match (`Fighter.debutMatchPending`, see `matchScoring`). */
+export const DEBUT_MATCH_MULTIPLIER = 1.5;
+
 export const VENUES: Venue[] = [
   {
     id: 'backyard',
@@ -46,7 +67,7 @@ export const STARTING_FIGHTERS: Fighter[] = [
   {
     id: 'f1',
     name: 'The Iron Giant',
-    stats: { strength: 28, charisma: 14, stamina: 20, skill: 16 },
+    stats: { power: 28, mic: 14, endurance: 20, technique: 16 },
     salary: 0,
     signingBonus: 0,
     popularity: 6,
@@ -60,7 +81,7 @@ export const STARTING_FIGHTERS: Fighter[] = [
   {
     id: 'f2',
     name: 'Neon Ninja',
-    stats: { strength: 14, charisma: 22, stamina: 22, skill: 26 },
+    stats: { power: 14, mic: 22, endurance: 22, technique: 26 },
     salary: 0,
     signingBonus: 0,
     popularity: 8,
@@ -74,7 +95,7 @@ export const STARTING_FIGHTERS: Fighter[] = [
   {
     id: 'f3',
     name: 'Bulk Hogan',
-    stats: { strength: 26, charisma: 20, stamina: 16, skill: 14 },
+    stats: { power: 26, mic: 20, endurance: 16, technique: 14 },
     salary: 0,
     signingBonus: 0,
     popularity: 10,
@@ -87,14 +108,72 @@ export const STARTING_FIGHTERS: Fighter[] = [
   },
 ];
 
+/** Max facility `level` per `GameState.leagueIndex` (aligned with `LEAGUE_TIERS` order). */
+const FACILITY_MAX_LEVEL_BY_LEAGUE = {
+  /** Performance Center level = concurrent training slots; starts at 0 (no camp until upgraded). */
+  performance_center: [1, 2, 3, 4],
+  /** First league: 3; second: 5; then +2 per promotion (example curve). */
+  wellness_center: [3, 5, 7, 9],
+  merch_booth: [4, 6, 8, 10],
+  travel_package: [3, 5, 7, 10],
+  sponsor_lounge: [3, 5, 8, 12],
+} as const satisfies Record<string, readonly number[]>;
+
 export const AVAILABLE_FACILITIES: Facility[] = [
   {
     id: 'performance_center',
     name: 'Performance Center',
     level: 0,
     baseCost: 4200,
-    description: 'Unlocks recruiting and adds one concurrent rookie training slot per level.',
-    effect: '+1 recruit slot per level',
+    upgradeCostMultiplier: 2.1,
+    maxLevelByLeagueIndex: [...FACILITY_MAX_LEVEL_BY_LEAGUE.performance_center],
+    description:
+      'Each level is one concurrent rookie camp slot. At level 0 you cannot run camp—upgrade here, or sign prospects raw (weaker, no slot).',
+    effect: '+1 recruit training slot per level (0 = none)',
+  },
+  {
+    id: 'wellness_center',
+    name: 'Wellness Center',
+    level: 0,
+    baseCost: 2_800,
+    upgradeCostMultiplier: 2.65,
+    firstUpgradeDiscount: 500,
+    maxLevelByLeagueIndex: [...FACILITY_MAX_LEVEL_BY_LEAGUE.wellness_center],
+    description: 'Sports science, sleep tracking, and soft-tissue work so the roster bounces back faster between cards.',
+    effect: '+1 daily energy recovery per fighter per level',
+  },
+  {
+    id: 'merch_booth',
+    name: 'Merch Booth',
+    level: 0,
+    baseCost: 3_200,
+    upgradeCostMultiplier: 2.25,
+    requiredLeagueIndex: 1,
+    maxLevelByLeagueIndex: [...FACILITY_MAX_LEVEL_BY_LEAGUE.merch_booth],
+    description: 'Move branded gear on the road; fans leave with shirts and you leave with extra gate.',
+    effect: '+2% ticket gate per level',
+  },
+  {
+    id: 'travel_package',
+    name: 'Travel & Catering',
+    level: 0,
+    baseCost: 7_500,
+    upgradeCostMultiplier: 2.35,
+    requiredLeagueIndex: 2,
+    maxLevelByLeagueIndex: [...FACILITY_MAX_LEVEL_BY_LEAGUE.travel_package],
+    description: 'Keep the crew fed and on time so every town feels like a headline market.',
+    effect: '+$750 show bonus per level',
+  },
+  {
+    id: 'sponsor_lounge',
+    name: 'Sponsor Lounge',
+    level: 0,
+    baseCost: 14_000,
+    upgradeCostMultiplier: 2.5,
+    requiredLeagueIndex: 3,
+    maxLevelByLeagueIndex: [...FACILITY_MAX_LEVEL_BY_LEAGUE.sponsor_lounge],
+    description: 'Corporate partners cut checks for access, signage, and soft drinks nobody drinks.',
+    effect: '+$2,500 show bonus per level',
   },
 ];
 

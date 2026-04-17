@@ -1,3 +1,5 @@
+import { expectedAverageMatchScoreForPopularityTier } from '../constants';
+
 /** Integer tier (1+) for unlocks and expectations; `popularity` may include fractional progress toward the next tier. */
 export function promotionTier(popularity: number): number {
   return Math.max(1, Math.floor(popularity));
@@ -14,13 +16,22 @@ export function showScoreFromRating(rating: number): number {
 }
 
 /**
- * Expected show quality (1–5 rating scale) for your current promotion popularity.
- * Fans expect more as the brand grows.
+ * Map mean match score (uncapped) onto the internal 1–5 show-quality band used for
+ * promotion expectation (`computePromotionPopularityDelta`).
  */
-export function getExpectedShowRating(promotionPopularity: number): number {
-  const tier = promotionTier(promotionPopularity);
-  const raw = 2.2 + Math.min(1.85, tier * 0.044);
-  return Math.round(raw * 20) / 20;
+export function showQualityRatingFromAverageMatchScore(avg: number): number {
+  if (!Number.isFinite(avg) || avg <= 0) return 1;
+  return Math.min(5, Math.max(1, Math.round((1.4 + avg / 120) * 20) / 20));
+}
+
+/** Inverse of `showQualityRatingFromAverageMatchScore` for a legacy stored 1–5 expectation (save migration). */
+export function averageMatchScoreFromExpectedQualityRating(rating: number): number {
+  return Math.max(0, Math.round((rating - 1.4) * 120));
+}
+
+/** Mean match score fans expect for this promotion popularity (`EXPECTED_AVERAGE_MATCH_SCORE_BY_POPULARITY_TIER`). */
+export function getExpectedAverageMatchScore(promotionPopularity: number): number {
+  return expectedAverageMatchScoreForPopularityTier(promotionTier(promotionPopularity));
 }
 
 /** ~0.30 toward the next tier when you beat expectations by ~1 star (tunable). */
@@ -32,29 +43,31 @@ const LOSS_PER_RATING_POINT = 0.045;
 const LOSS_FLOOR = 0.22;
 
 /**
- * Compare final show rating to the expectation for popularity going into the show.
+ * Compare match-driven show quality (1–5, same mapping as `showQualityRatingFromAverageMatchScore`)
+ * to the fan expectation implied by `getExpectedAverageMatchScore` for popularity going into the show.
  * Returns fractional progress toward the next tier (1.0 = one full level); losses are smaller than gains.
  */
 export function computePromotionPopularityDelta(
-  showRating: number,
+  showQualityFromMatches: number,
   promotionPopularityBeforeShow: number,
-): { delta: number; expectedRating: number } {
-  const expectedRating = getExpectedShowRating(promotionPopularityBeforeShow);
-  const diff = showRating - expectedRating;
+): { delta: number; expectedAverageMatchScore: number } {
+  const expectedAverageMatchScore = getExpectedAverageMatchScore(promotionPopularityBeforeShow);
+  const expectedQuality = showQualityRatingFromAverageMatchScore(expectedAverageMatchScore);
+  const diff = showQualityFromMatches - expectedQuality;
   const eps = 0.004;
 
   if (diff > eps) {
     const raw = GAIN_BASE + diff * GAIN_PER_RATING_POINT;
     const delta = Math.min(GAIN_CAP, Math.max(0.06, raw));
-    return { delta: Math.round(delta * 1000) / 1000, expectedRating };
+    return { delta: Math.round(delta * 1000) / 1000, expectedAverageMatchScore };
   }
   if (diff < -eps) {
     const raw = -(LOSS_BASE + Math.abs(diff) * LOSS_PER_RATING_POINT);
     const delta = Math.max(-LOSS_FLOOR, raw);
-    return { delta: Math.round(delta * 1000) / 1000, expectedRating };
+    return { delta: Math.round(delta * 1000) / 1000, expectedAverageMatchScore };
   }
 
-  return { delta: 0, expectedRating };
+  return { delta: 0, expectedAverageMatchScore };
 }
 
 /** Fill % toward the next whole popularity (e.g. at 1 the bar is empty until progress toward 2). */

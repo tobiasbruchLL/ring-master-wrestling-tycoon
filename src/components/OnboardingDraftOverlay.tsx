@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Fighter } from '../types';
 import { OPENING_DRAFT_PICKS, rollDistinctLowStatPair } from '../lib/draftRoster';
-import { cn, fighterPower } from '../lib/utils';
+import { cn, fighterOverallRating } from '../lib/utils';
 
 type OnboardingDraftOverlayProps = {
   onComplete: (roster: Fighter[]) => void;
@@ -54,12 +54,8 @@ export default function OnboardingDraftOverlay({ onComplete }: OnboardingDraftOv
     <>
       A <Em>heel</Em> bends rules on purpose. Against a <Em>face</Em>, that tension sells tickets. Pick your <Em>heel</Em>.
     </>
-  ) : roundIndex === 2 ? (
-    <>Another pair—pick one.</>
-  ) : roundIndex === 3 ? (
-    <>Fourth signing.</>
   ) : (
-    <>Last pick.</>
+    <>Pick one.</>
   );
 
   const handlePick = useCallback(
@@ -187,7 +183,7 @@ function OnboardingHalfPick({
   onSelect: () => void;
   className?: string;
 }) {
-  const ovr = fighterPower(fighter.stats);
+  const ovr = fighterOverallRating(fighter.stats);
   return (
     <button
       type="button"
@@ -260,13 +256,13 @@ function OnboardingHalfPick({
           </div>
           <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">{fighter.trait}</p>
           <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px] font-bold uppercase tracking-tight text-zinc-400">
-            <span>Str {fighter.stats.strength}</span>
-            <span>Cha {fighter.stats.charisma}</span>
-            <span>Sta {fighter.stats.stamina}</span>
-            <span>Skl {fighter.stats.skill}</span>
+            <span>💥 PWR {fighter.stats.power}</span>
+            <span>⚡ TEC {fighter.stats.technique}</span>
+            <span>🛡️ END {fighter.stats.endurance}</span>
+            <span>🎤 MIC {fighter.stats.mic}</span>
           </div>
           <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
-            Power {ovr} · Pop {fighter.popularity}
+            OVR {ovr} · Pop {fighter.popularity}
           </p>
         </div>
       </div>

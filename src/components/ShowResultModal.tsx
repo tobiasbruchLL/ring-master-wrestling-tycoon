@@ -1,8 +1,6 @@
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Star, Users, DollarSign, TrendingUp } from 'lucide-react';
 import { Show } from '../types';
 import { formatCurrency, formatNumber, cn } from '../lib/utils';
-import { showScoreFromRating } from '../lib/promotionPopularity';
 
 interface ShowResultModalProps {
   isOpen: boolean;
@@ -11,9 +9,14 @@ interface ShowResultModalProps {
 }
 
 export default function ShowResultModal({ isOpen, onClose, show }: ShowResultModalProps) {
-  const showScore = showScoreFromRating(show.rating);
+  const showScore =
+    show.averageMatchScore !== undefined
+      ? Math.round(show.averageMatchScore)
+      : Math.max(0, Math.round((show.rating - 1.4) * 120));
   const expectedScore =
-    show.expectedShowRating !== undefined ? showScoreFromRating(show.expectedShowRating) : null;
+    show.expectedAverageMatchScore !== undefined
+      ? Math.round(show.expectedAverageMatchScore)
+      : null;
   const popDelta = show.popularityGain;
   const popLabel = (() => {
     if (popDelta === 0) return '±0';
@@ -27,26 +30,25 @@ export default function ShowResultModal({ isOpen, onClose, show }: ShowResultMod
   return (
     <AnimatePresence>
       {isOpen && (
-        <>
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={onClose}
-            className="fixed inset-0 bg-black/95 backdrop-blur-sm z-[150]"
-          />
-          <motion.div 
-            initial={{ scale: 0.9, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.9, opacity: 0 }}
-            className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-xs bg-bg border-4 border-accent p-8 z-[151] space-y-8"
-          >
-            <div className="text-center space-y-2">
-              <h2 className="text-14 font-display uppercase tracking-[4px] text-gold">Show Result</h2>
-              <h3 className="text-4xl font-display uppercase leading-none text-white">{show.name}</h3>
-            </div>
+        <motion.div
+          role="dialog"
+          aria-modal
+          aria-labelledby="show-result-title"
+          initial={{ opacity: 0, y: 24 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: 24 }}
+          transition={{ type: 'spring', damping: 26, stiffness: 280 }}
+          className="absolute inset-0 z-[150] flex min-h-0 flex-col bg-[radial-gradient(circle_at_center,#1a1a1a_0%,#0d0d0d_100%)]"
+        >
+          <header className="shrink-0 border-b-4 border-accent px-6 pb-5 pt-[max(1.25rem,env(safe-area-inset-top))] text-center">
+            <p id="show-result-title" className="text-14 font-display uppercase tracking-[4px] text-gold">
+              Show Result
+            </p>
+            <h2 className="mt-2 text-4xl font-display uppercase leading-none text-white">{show.name}</h2>
+          </header>
 
-            <div className="space-y-6">
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-8">
+            <div className="mx-auto flex w-full max-w-sm flex-col space-y-8">
               <div className="grid grid-cols-2 gap-4 border-b border-border pb-4">
                 <div>
                   <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Ticket sales</p>
@@ -81,13 +83,15 @@ export default function ShowResultModal({ isOpen, onClose, show }: ShowResultMod
                 </div>
               </div>
 
-              <div className="flex justify-between items-center bg-card p-4 border border-border">
+              <div className="flex items-center justify-between border border-border bg-card p-4">
                 <div>
                   <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Net Profit</p>
-                  <p className={cn(
-                    "text-3xl font-display",
-                    (show.revenue - (show.venueCost + show.setupCost)) >= 0 ? "text-green-500" : "text-accent"
-                  )}>
+                  <p
+                    className={cn(
+                      'text-3xl font-display',
+                      show.revenue - (show.venueCost + show.setupCost) >= 0 ? 'text-green-500' : 'text-accent',
+                    )}
+                  >
                     {formatCurrency(show.revenue - (show.venueCost + show.setupCost))}
                   </p>
                 </div>
@@ -111,15 +115,18 @@ export default function ShowResultModal({ isOpen, onClose, show }: ShowResultMod
                 <p className="text-lg font-display text-white">{formatNumber(show.attendance)}</p>
               </div>
             </div>
+          </div>
 
+          <footer className="shrink-0 border-t border-border bg-bg px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4">
             <button
+              type="button"
               onClick={onClose}
-              className="w-full bg-white hover:bg-accent hover:text-white text-black font-display py-4 uppercase tracking-tighter transition-all"
+              className="w-full bg-white py-4 font-display uppercase tracking-tighter text-black transition-all hover:bg-accent hover:text-white"
             >
               Continue
             </button>
-          </motion.div>
-        </>
+          </footer>
+        </motion.div>
       )}
     </AnimatePresence>
   );

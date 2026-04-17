@@ -15,23 +15,26 @@ import {
   getRecruitTrainingInjuryChancePercent,
   RECRUIT_TRAINING_HIGH_MISHAP_WARNING_OVER_PERCENT,
   RECRUIT_TRAINING_LOW_ENERGY_THRESHOLD,
+  RECRUIT_TRAINING_DAYS_TOTAL,
 } from '../lib/recruitTraining';
 
 type ChoiceMap = Record<string, RecruitTrainingChoice | null>;
 
-const STAT_KEYS: (keyof FighterStats)[] = ['strength', 'charisma', 'stamina', 'skill'];
+const STAT_KEYS: (keyof FighterStats)[] = ['power', 'technique', 'endurance', 'mic'];
 
 const statLabel: Record<keyof FighterStats, string> = {
-  strength: 'PWR',
-  charisma: 'MIC',
-  stamina: 'STM',
-  skill: 'TEC',
+  power: '💥 PWR',
+  technique: '⚡ TEC',
+  endurance: '🛡️ END',
+  mic: '🎤 MIC',
 };
 
 interface RecruitTrainingModalProps {
   isOpen: boolean;
   recruits: ActiveRecruit[];
   roster: Fighter[];
+  /** Roster cap from HQ expansion + league tier; used to block final-day debuts when the roster is full. */
+  maxRosterSize: number;
   onClose: () => void;
   onSubmit: (choices: { recruitId: string; choice: RecruitTrainingChoice }[]) => RecruitTrainingSessionSummary[];
 }
@@ -63,26 +66,31 @@ function RecruitStatRow({ stats, label = 'Current stats' }: { stats: FighterStat
       <p className="text-[9px] font-bold text-zinc-600 uppercase tracking-widest mb-1">{label}</p>
       <div className="grid grid-cols-4 gap-1 text-[9px] font-bold text-zinc-400 uppercase tracking-tighter">
         <span>
-          {statLabel.strength} {stats.strength}
+          {statLabel.power} {stats.power}
         </span>
         <span>
-          {statLabel.charisma} {stats.charisma}
+          {statLabel.technique} {stats.technique}
         </span>
         <span>
-          {statLabel.stamina} {stats.stamina}
+          {statLabel.endurance} {stats.endurance}
         </span>
         <span>
-          {statLabel.skill} {stats.skill}
+          {statLabel.mic} {stats.mic}
         </span>
       </div>
     </div>
   );
 }
 
+function isRosterFullDebutBlocked(r: ActiveRecruit, rosterLen: number, maxRosterSize: number): boolean {
+  return r.daysTrained === RECRUIT_TRAINING_DAYS_TOTAL - 1 && rosterLen >= maxRosterSize;
+}
+
 export default function RecruitTrainingModal({
   isOpen,
   recruits,
   roster,
+  maxRosterSize,
   onClose,
   onSubmit,
 }: RecruitTrainingModalProps) {
@@ -106,7 +114,13 @@ export default function RecruitTrainingModal({
     }
   }, [isOpen, recruits]);
 
-  const allPicked = recruits.length > 0 && recruits.every((r) => choices[r.id] !== null && choices[r.id] !== undefined);
+  const allPicked =
+    recruits.length > 0 &&
+    recruits.every(
+      (r) =>
+        isRosterFullDebutBlocked(r, roster.length, maxRosterSize) ||
+        (choices[r.id] !== null && choices[r.id] !== undefined),
+    );
 
   const setChoice = (id: string, c: RecruitTrainingChoice) => {
     setChoices((prev) => ({ ...prev, [id]: c }));
@@ -114,7 +128,10 @@ export default function RecruitTrainingModal({
 
   const handleSubmit = () => {
     if (!allPicked) return;
-    const list = recruits.map((r) => ({ recruitId: r.id, choice: choices[r.id]! }));
+    const list = recruits.map((r) => ({
+      recruitId: r.id,
+      choice: isRosterFullDebutBlocked(r, roster.length, maxRosterSize) ? 'rest' : choices[r.id]!,
+    }));
     const nextSummaries = dedupeTrainingSummariesByRecruitId(onSubmit(list));
     setSummaries(nextSummaries);
     setPhase('results');
@@ -150,11 +167,12 @@ export default function RecruitTrainingModal({
             {phase === 'pick' && (
               <>
                 {recruits.map((r) => {
+                  const debutBlocked = isRosterFullDebutBlocked(r, roster.length, maxRosterSize);
                   const ch = choices[r.id];
                   const mishapPct = ch != null ? getRecruitTrainingInjuryChancePercent(r.energy, ch) : null;
                   const gainPreview = ch != null ? getRecruitStatGainRangePreview(r, ch, roster) : null;
                   const bestYieldKeys = getRecruitBestYieldStatKeys(r, roster);
-                  const statFocusMishapPct = getRecruitTrainingInjuryChancePercent(r.energy, 'strength');
+                  const statFocusMishapPct = getRecruitTrainingInjuryChancePercent(r.energy, 'power');
                   const showHighMishapWarning =
                     statFocusMishapPct > RECRUIT_TRAINING_HIGH_MISHAP_WARNING_OVER_PERCENT;
                   const pickHasHighMishap =
@@ -165,7 +183,8 @@ export default function RecruitTrainingModal({
                         <div>
                           <h3 className="font-display uppercase text-lg text-white leading-tight">{r.name}</h3>
                           <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">
-                            Day {Math.min(10, r.daysTrained + 1)} / 10
+                            Day {Math.min(RECRUIT_TRAINING_DAYS_TOTAL, r.daysTrained + 1)} /{' '}
+                            {RECRUIT_TRAINING_DAYS_TOTAL}
                           </p>
                         </div>
                         <span className="text-[10px] font-display text-accent uppercase">Energy {r.energy}%</span>
@@ -174,6 +193,15 @@ export default function RecruitTrainingModal({
                         <div className="h-full bg-accent transition-all" style={{ width: `${r.energy}%` }} />
                       </div>
                       <RecruitStatRow stats={r.stats} />
+                      {debutBlocked && (
+                        <p className="flex gap-2 items-start text-[10px] text-accent font-bold uppercase tracking-wide leading-snug">
+                          <AlertTriangle className="shrink-0 mt-0.5" size={14} aria-hidden />
+                          <span>
+                            Roster is full ({roster.length}/{maxRosterSize}). Release someone or buy Locker Room
+                            Expansion in Upgrades before this rookie can debut.
+                          </span>
+                        </p>
+                      )}
                       {showHighMishapWarning && (
                         <p className="flex gap-2 items-start text-[10px] text-red-400 font-bold uppercase tracking-wide leading-snug">
                           <AlertTriangle className="shrink-0 mt-0.5" size={14} aria-hidden />
@@ -188,46 +216,48 @@ export default function RecruitTrainingModal({
                           Low energy — stat training can misfire
                         </p>
                       )}
-                      <div className="flex flex-wrap gap-2">
-                        {STAT_KEYS.map((k) => {
-                          const isBestYield = bestYieldKeys.includes(k);
-                          return (
+                      {!debutBlocked && (
+                        <div className="flex flex-wrap gap-2">
+                          {STAT_KEYS.map((k) => {
+                            const isBestYield = bestYieldKeys.includes(k);
+                            return (
+                              <button
+                                key={k}
+                                type="button"
+                                title={
+                                  isBestYield
+                                    ? 'Highest potential stat gain if the session goes well (mentor-based)'
+                                    : undefined
+                                }
+                                onClick={() => setChoice(r.id, k)}
+                                className={cn(
+                                  'px-3 py-2 font-display uppercase text-[10px] tracking-widest border transition-all',
+                                  choices[r.id] === k
+                                    ? 'border-accent bg-accent text-white'
+                                    : isBestYield
+                                      ? 'border-emerald-500 text-emerald-100 shadow-[0_0_14px_rgba(16,185,129,0.22)] hover:border-emerald-400'
+                                      : 'border-border text-zinc-400 hover:text-white',
+                                )}
+                              >
+                                {statLabel[k]}
+                              </button>
+                            );
+                          })}
                           <button
-                            key={k}
                             type="button"
-                            title={
-                              isBestYield
-                                ? 'Highest potential stat gain if the session goes well (mentor-based)'
-                                : undefined
-                            }
-                            onClick={() => setChoice(r.id, k)}
+                            onClick={() => setChoice(r.id, 'rest')}
                             className={cn(
                               'px-3 py-2 font-display uppercase text-[10px] tracking-widest border transition-all',
-                              choices[r.id] === k
-                                ? 'border-accent bg-accent text-white'
-                                : isBestYield
-                                  ? 'border-emerald-500 text-emerald-100 shadow-[0_0_14px_rgba(16,185,129,0.22)] hover:border-emerald-400'
-                                  : 'border-border text-zinc-400 hover:text-white',
+                              choices[r.id] === 'rest'
+                                ? 'border-gold bg-gold text-black'
+                                : 'border-border text-zinc-400 hover:text-white',
                             )}
                           >
-                            {statLabel[k]}
+                            Rest
                           </button>
-                          );
-                        })}
-                        <button
-                          type="button"
-                          onClick={() => setChoice(r.id, 'rest')}
-                          className={cn(
-                            'px-3 py-2 font-display uppercase text-[10px] tracking-widest border transition-all',
-                            choices[r.id] === 'rest'
-                              ? 'border-gold bg-gold text-black'
-                              : 'border-border text-zinc-400 hover:text-white',
-                          )}
-                        >
-                          Rest
-                        </button>
-                      </div>
-                      {ch != null && (
+                        </div>
+                      )}
+                      {ch != null && !debutBlocked && (
                         <div className="rounded border border-border/80 bg-bg/80 px-3 py-2 space-y-1.5 text-[10px] font-bold uppercase tracking-wide text-zinc-400">
                           <p>
                             <span className="text-zinc-500">Mishap chance (this pick): </span>
@@ -280,6 +310,12 @@ export default function RecruitTrainingModal({
                         </span>
                       )}
                     </div>
+                    {s.blockedBecauseRosterFull ? (
+                      <p className="text-sm text-accent font-bold uppercase tracking-wide leading-snug">
+                        Debut held — roster is full. Free a slot or expand capacity in Upgrades, then run another day.
+                      </p>
+                    ) : (
+                      <>
                     <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">
                       Focus: {s.choice === 'rest' ? 'Rest' : statLabel[s.choice as keyof FighterStats]}
                     </p>
@@ -302,6 +338,8 @@ export default function RecruitTrainingModal({
                         {s.energyDelta})
                       </span>
                     </p>
+                      </>
+                    )}
                   </div>
                   ))}
               </div>

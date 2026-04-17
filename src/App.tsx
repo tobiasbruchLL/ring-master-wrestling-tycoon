@@ -1,8 +1,14 @@
 import { useEffect, useRef, useState, ReactNode } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Trophy, Users, Building2, Settings as SettingsIcon, UserPlus } from 'lucide-react';
-import { useGameState, getPlannedShowRunBlockReason, isPlannedShowRunnableNow } from './hooks/useGameState';
-import { cn, formatNumber } from './lib/utils';
+import { Trophy, Users, Building2, Settings as SettingsIcon, UserPlus, Crown } from 'lucide-react';
+import {
+  useGameState,
+  getPlannedShowRunBlockReason,
+  applyWinnerHpOverridesToShowSimulation,
+} from './hooks/useGameState';
+import { cn, formatNumber, hasAffordableFacilityUpgrade } from './lib/utils';
+import { getMaxRosterSize, hasAffordableRosterCapacityUpgrade } from './lib/rosterCapacity';
+import { hasAffordableTicketPriceUpgrade } from './lib/ticketPriceUpgrade';
 import { getPromotionPopularityBar, promotionTier } from './lib/promotionPopularity';
 
 // Components
@@ -11,40 +17,51 @@ import Roster from './features/Roster';
 import Facilities from './features/Facilities';
 import Recruiting from './features/Recruiting';
 import ShowPlanner from './features/ShowPlanner';
+import Leagues from './features/Leagues';
 import MatchSimulation from './features/MatchSimulation';
 import SettingsMenu from './components/SettingsMenu';
 import DebugMenu from './components/DebugMenu';
 import ShowResultModal from './components/ShowResultModal';
 import RecruitTrainingModal from './components/RecruitTrainingModal';
+import RecruitGraduationModal from './components/RecruitGraduationModal';
 import OnboardingDraftOverlay from './components/OnboardingDraftOverlay';
+import EndDayNoShowWarningModal from './components/EndDayNoShowWarningModal';
 import { useToastStack } from './components/ToastStack';
-import { Match, ShowSimulationResult, hasPendingRecruitTraining, getRecruitSlotCap } from './types';
+import {
+  GameState,
+  Match,
+  ShowSimulationResult,
+  hasPendingRecruitGraduation,
+  hasPendingRecruitTraining,
+} from './types';
 
-type View = 'dashboard' | 'roster' | 'facilities' | 'recruiting' | 'planner' | 'simulating';
+type View = 'dashboard' | 'roster' | 'facilities' | 'recruiting' | 'planner' | 'simulating' | 'leagues';
 
 export default function App() {
   const {
     state,
-    hireFighter,
     fireFighter,
     upgradeFacility,
+    upgradeRosterCapacity,
+    upgradeTicketPrice,
+    promoteLeague,
     simulateShow,
     commitSimulatedShow,
-    generateRandomFighter,
     resetGame,
     addMoney,
-    calculateMatchScore,
-    dismissRecruitProspect,
+    markRecruitProspectsSeen,
     enlistRecruit,
+    enlistRecruitSkipCamp,
     submitRecruitTrainingChoices,
+    completePendingRecruitGraduation,
     scheduleUpcomingShow,
     endDay,
+    endDayWithoutBookedShow,
     completeOpeningDraft,
   } = useGameState();
 
   const { enqueueMessage, enqueueInjuryRecoveries, stack: toastStack } = useToastStack();
 
-  const recruitCap = getRecruitSlotCap(state);
   const pendingTrainingRecruits = state.activeRecruits.filter((r) => r.needsTrainingChoice);
   const popularityBar = getPromotionPopularityBar(state.popularity);
 
@@ -52,9 +69,20 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isDebugOpen, setIsDebugOpen] = useState(false);
   const [showResult, setShowResult] = useState<boolean>(false);
+  const [endDayNoShowWarningOpen, setEndDayNoShowWarningOpen] = useState(false);
   const [recruitTrainingOpen, setRecruitTrainingOpen] = useState(false);
   const [pendingMatches, setPendingMatches] = useState<Match[]>([]);
   const [pendingShowSimulation, setPendingShowSimulation] = useState<ShowSimulationResult | null>(null);
+  const showSimBaselineRef = useRef<GameState | null>(null);
+  const pendingGrads = state.pendingRecruitGraduations ?? [];
+  const pendingGradHead = pendingGrads[0] ?? null;
+  const graduationModalOpen = Boolean(pendingGradHead) && !recruitTrainingOpen;
+  const showUpgradesNavDot =
+    currentView !== 'facilities' &&
+    (hasAffordableFacilityUpgrade(state) ||
+      hasAffordableRosterCapacityUpgrade(state) ||
+      hasAffordableTicketPriceUpgrade(state));
+  const showRecruitNavDot = currentView !== 'recruiting' && state.recruitProspectsUnread;
   const bootstrappedTrainingRef = useRef(false);
   const prevShowResultOpenRef = useRef(showResult);
   const debugTapCountRef = useRef(0);
@@ -62,21 +90,30 @@ export default function App() {
   useEffect(() => {
     if (bootstrappedTrainingRef.current) return;
     bootstrappedTrainingRef.current = true;
+    if (hasPendingRecruitGraduation(state)) return;
     if (hasPendingRecruitTraining(state)) setRecruitTrainingOpen(true);
   }, []);
 
   useEffect(() => {
-    if (prevShowResultOpenRef.current && !showResult && hasPendingRecruitTraining(state)) {
+    if (prevShowResultOpenRef.current && !showResult && !hasPendingRecruitGraduation(state) && hasPendingRecruitTraining(state)) {
       setRecruitTrainingOpen(true);
     }
     prevShowResultOpenRef.current = showResult;
   }, [showResult, state]);
 
   useEffect(() => {
-    if (currentView === 'recruiting' && recruitCap <= 0) {
-      setCurrentView('dashboard');
+    if (currentView === 'recruiting') {
+      markRecruitProspectsSeen();
     }
-  }, [currentView, recruitCap]);
+  }, [currentView, markRecruitProspectsSeen]);
+
+  /** After the graduation queue clears, reopen rookie training if the new day still needs picks. */
+  useEffect(() => {
+    if ((state.pendingRecruitGraduations?.length ?? 0) > 0) return;
+    if (!state.activeRecruits.some((r) => r.needsTrainingChoice)) return;
+    if (recruitTrainingOpen) return;
+    setRecruitTrainingOpen(true);
+  }, [state.activeRecruits, state.pendingRecruitGraduations, recruitTrainingOpen]);
 
   useEffect(() => {
     return () => {
@@ -87,7 +124,14 @@ export default function App() {
   }, []);
 
   const plannedShowRunBlockedReason = getPlannedShowRunBlockReason(state);
-  const mustRunShowBeforeEndDay = isPlannedShowRunnableNow(state);
+  const bookedShow = state.upcomingShow;
+  const showNightIsDue = Boolean(bookedShow && state.currentDay >= bookedShow.showDay);
+  const canRunShowTonight = showNightIsDue && plannedShowRunBlockedReason === null;
+  const primaryDayAction: 'plan_show' | 'run_show' | 'end_day' = !bookedShow
+    ? 'plan_show'
+    : canRunShowTonight
+      ? 'run_show'
+      : 'end_day';
 
   const showToast = (message: string) => {
     enqueueMessage(message);
@@ -108,6 +152,7 @@ export default function App() {
       return;
     }
     const plan = state.upcomingShow!;
+    showSimBaselineRef.current = state;
     setPendingMatches(plan.matches);
     setPendingShowSimulation(simulateShow(plan.matches, plan.venueId));
     setCurrentView('simulating');
@@ -121,7 +166,32 @@ export default function App() {
     } else {
       enqueueInjuryRecoveries(result.injuryRecoveries);
       showToast('All Fighters restore some energy');
+      if (result.needsRecruitTrainingChoice && !hasPendingRecruitGraduation(state)) {
+        setRecruitTrainingOpen(true);
+      }
     }
+  };
+
+  const finalizeEndDayWithoutBookedShow = (persistDontShowAgain: boolean) => {
+    const result = endDayWithoutBookedShow({ persistDontShowAgain });
+    if (result.ok === false) {
+      if (hasPendingRecruitTraining(state)) setRecruitTrainingOpen(true);
+      showToast(result.reason);
+      return;
+    }
+    enqueueInjuryRecoveries(result.injuryRecoveries);
+    showToast('Fans cooled on the brand (−10% promotion popularity). Fighters recover energy.');
+    if (result.needsRecruitTrainingChoice && !hasPendingRecruitGraduation(state)) {
+      setRecruitTrainingOpen(true);
+    }
+  };
+
+  const requestEndDayWithoutBookedShow = () => {
+    if (state.skipEndDayNoShowWarning) {
+      finalizeEndDayWithoutBookedShow(false);
+      return;
+    }
+    setEndDayNoShowWarningOpen(true);
   };
 
   const handleDebugTap = () => {
@@ -147,35 +217,35 @@ export default function App() {
     switch (currentView) {
       case 'dashboard':
         return (
-          <Dashboard
-            state={state}
-            onPlanShow={openPlanner}
-            onRunPlannedShow={handleRunPlannedShow}
-            plannedShowRunBlockedReason={plannedShowRunBlockedReason}
-          />
+          <Dashboard state={state} />
         );
       case 'roster':
-        return <Roster state={state} onHire={hireFighter} onFire={fireFighter} generateFighter={generateRandomFighter} />;
+        return <Roster state={state} onFire={fireFighter} />;
       case 'facilities':
-        return <Facilities state={state} onUpgrade={upgradeFacility} />;
+        return (
+          <Facilities
+            state={state}
+            onUpgrade={upgradeFacility}
+            onUpgradeRosterCapacity={upgradeRosterCapacity}
+            onUpgradeTicketPrice={upgradeTicketPrice}
+          />
+        );
+      case 'leagues':
+        return <Leagues state={state} onPromote={promoteLeague} />;
       case 'recruiting':
         return (
-          <Recruiting
-            state={state}
-            onDismissProspect={dismissRecruitProspect}
-            onEnlist={enlistRecruit}
-          />
+          <Recruiting state={state} onEnlist={enlistRecruit} onSkipCamp={enlistRecruitSkipCamp} />
         );
       case 'planner':
         return (
           <ShowPlanner
             state={state}
-            calculateMatchScore={calculateMatchScore}
             onScheduleShow={(matches, venueId) => {
               scheduleUpcomingShow(matches, venueId);
               setCurrentView('dashboard');
             }}
             onCancel={() => setCurrentView('dashboard')}
+            onToast={showToast}
           />
         );
       case 'simulating':
@@ -183,11 +253,18 @@ export default function App() {
           <MatchSimulation
             matches={pendingMatches}
             roster={state.roster}
+            showHistory={state.history}
             perMatchOutcomes={pendingShowSimulation.perMatchOutcomes}
-            onComplete={() => {
+            onComplete={(winnerHpPercents) => {
               const sim = pendingShowSimulation;
-              commitSimulatedShow(sim);
-              enqueueInjuryRecoveries(sim.injuryRecoveries);
+              const baseline = showSimBaselineRef.current;
+              const toCommit =
+                baseline != null
+                  ? applyWinnerHpOverridesToShowSimulation(baseline, sim, winnerHpPercents)
+                  : sim;
+              showSimBaselineRef.current = null;
+              commitSimulatedShow(toCommit);
+              enqueueInjuryRecoveries(toCommit.injuryRecoveries);
               setPendingShowSimulation(null);
               setCurrentView('dashboard');
               setShowResult(true);
@@ -197,12 +274,7 @@ export default function App() {
         ) : null;
       default:
         return (
-          <Dashboard
-            state={state}
-            onPlanShow={openPlanner}
-            onRunPlannedShow={handleRunPlannedShow}
-            plannedShowRunBlockedReason={plannedShowRunBlockedReason}
-          />
+          <Dashboard state={state} />
         );
     }
   };
@@ -267,7 +339,7 @@ export default function App() {
               currentView === 'recruiting'
               ? 'flex min-h-0 flex-col overflow-hidden'
               : 'overflow-y-auto pb-20',
-            currentView === 'dashboard' && 'pb-28',
+            currentView === 'dashboard' && 'pb-40',
             (currentView === 'roster' || currentView === 'recruiting') && 'pb-20',
           )}
         >
@@ -293,25 +365,57 @@ export default function App() {
         </main>
 
         {currentView === 'dashboard' && (
-          <div className="pointer-events-none absolute bottom-16 left-0 right-0 z-30 px-4 pb-3">
-            <button
-              type="button"
-              disabled={mustRunShowBeforeEndDay}
-              title={
-                mustRunShowBeforeEndDay
-                  ? 'Run the booked show tonight; the day advances after the event.'
-                  : undefined
-              }
-              onClick={handleEndDay}
-              className={cn(
-                'pointer-events-auto w-full border border-border bg-zinc-900 py-4 font-display text-lg uppercase tracking-tighter text-white shadow-lg transition-colors',
-                mustRunShowBeforeEndDay
-                  ? 'cursor-not-allowed opacity-45 hover:border-border hover:bg-zinc-900'
-                  : 'hover:border-accent hover:bg-card',
-              )}
-            >
-              END DAY
-            </button>
+          <div className="pointer-events-none absolute bottom-16 left-0 right-0 z-30 space-y-2 px-4 pb-3">
+            {primaryDayAction === 'plan_show' && (
+              <>
+                <button
+                  type="button"
+                  onClick={requestEndDayWithoutBookedShow}
+                  className="pointer-events-auto w-full border border-zinc-600 bg-transparent py-3 font-display text-sm uppercase tracking-tighter text-zinc-400 shadow-sm transition-colors hover:border-zinc-500 hover:bg-zinc-900/60 hover:text-zinc-200"
+                >
+                  End day
+                </button>
+                <button
+                  type="button"
+                  onClick={openPlanner}
+                  className="pointer-events-auto w-full border border-border bg-white py-4 font-display text-lg uppercase tracking-tighter text-black shadow-lg transition-colors hover:border-accent hover:bg-accent hover:text-white"
+                >
+                  PLAN SHOW
+                </button>
+              </>
+            )}
+            {primaryDayAction === 'run_show' && (
+              <>
+                <button
+                  type="button"
+                  disabled={plannedShowRunBlockedReason !== null}
+                  title={plannedShowRunBlockedReason ?? "Run tonight's card; the day advances after the event."}
+                  onClick={handleRunPlannedShow}
+                  className={cn(
+                    'pointer-events-auto w-full border border-border py-4 font-display text-lg uppercase tracking-tighter shadow-lg transition-colors',
+                    plannedShowRunBlockedReason
+                      ? 'cursor-not-allowed bg-zinc-800 text-zinc-600 opacity-90'
+                      : 'bg-white text-black hover:border-accent hover:bg-accent hover:text-white',
+                  )}
+                >
+                  RUN SHOW
+                </button>
+                {plannedShowRunBlockedReason && (
+                  <p className="pointer-events-auto text-center text-[10px] font-bold uppercase leading-snug tracking-wide text-accent">
+                    {plannedShowRunBlockedReason}
+                  </p>
+                )}
+              </>
+            )}
+            {primaryDayAction === 'end_day' && (
+              <button
+                type="button"
+                onClick={handleEndDay}
+                className="pointer-events-auto w-full border border-border bg-zinc-900 py-4 font-display text-lg uppercase tracking-tighter text-white shadow-lg transition-colors hover:border-accent hover:bg-card"
+              >
+                END DAY
+              </button>
+            )}
           </div>
         )}
 
@@ -330,16 +434,10 @@ export default function App() {
           />
           <NavButton
             active={currentView === 'recruiting'}
-            locked={recruitCap <= 0}
-            onClick={() => {
-              if (recruitCap <= 0) {
-                showToast('Unlock recruiting by upgrading your Performance Center in Upgrades.');
-                return;
-              }
-              setCurrentView('recruiting');
-            }}
+            onClick={() => setCurrentView('recruiting')}
             icon={<UserPlus size={18} />}
             label="Recruit"
+            notify={showRecruitNavDot}
           />
           <NavButton
             active={currentView === 'dashboard'}
@@ -347,11 +445,18 @@ export default function App() {
             icon={<Trophy size={18} />}
             label="Home"
           />
-          <NavButton 
-            active={currentView === 'facilities'} 
-            onClick={() => setCurrentView('facilities')} 
-            icon={<Building2 size={18} />} 
-            label="Upgrades" 
+          <NavButton
+            active={currentView === 'leagues'}
+            onClick={() => setCurrentView('leagues')}
+            icon={<Crown size={18} />}
+            label="Leagues"
+          />
+          <NavButton
+            active={currentView === 'facilities'}
+            onClick={() => setCurrentView('facilities')}
+            icon={<Building2 size={18} />}
+            label="Upgrades"
+            notify={showUpgradesNavDot}
           />
         </nav>
 
@@ -373,8 +478,23 @@ export default function App() {
           isOpen={recruitTrainingOpen}
           recruits={pendingTrainingRecruits}
           roster={state.roster}
+          maxRosterSize={getMaxRosterSize(state)}
           onClose={() => setRecruitTrainingOpen(false)}
           onSubmit={(choices) => submitRecruitTrainingChoices(choices)}
+        />
+        <RecruitGraduationModal
+          isOpen={graduationModalOpen}
+          pending={pendingGradHead}
+          remainingAfter={Math.max(0, pendingGrads.length - 1)}
+          onPickAlignment={completePendingRecruitGraduation}
+        />
+        <EndDayNoShowWarningModal
+          isOpen={endDayNoShowWarningOpen}
+          onClose={() => setEndDayNoShowWarningOpen(false)}
+          onConfirm={(dontShowAgain) => {
+            setEndDayNoShowWarningOpen(false);
+            finalizeEndDayWithoutBookedShow(dontShowAgain);
+          }}
         />
 
         {toastStack}
@@ -393,12 +513,14 @@ function NavButton({
   onClick,
   icon,
   label,
+  notify,
 }: {
   active: boolean;
   locked?: boolean;
   onClick: () => void;
   icon: ReactNode;
   label: string;
+  notify?: boolean;
 }) {
   return (
     <button
@@ -406,7 +528,7 @@ function NavButton({
       onClick={onClick}
       aria-disabled={locked ? true : undefined}
       className={cn(
-        'flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl transition-all',
+        'relative flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl transition-all',
         locked
           ? 'cursor-not-allowed text-zinc-600 opacity-50'
           : active
@@ -414,7 +536,15 @@ function NavButton({
             : 'text-zinc-500 hover:text-zinc-300',
       )}
     >
-      {icon}
+      <span className="relative inline-flex">
+        {icon}
+        {notify && (
+          <span
+            className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-accent ring-2 ring-card"
+            aria-hidden
+          />
+        )}
+      </span>
       <span className="text-[10px] font-bold uppercase tracking-wider">{label}</span>
     </button>
   );

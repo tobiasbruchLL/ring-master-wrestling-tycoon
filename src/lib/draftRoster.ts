@@ -2,7 +2,7 @@ import { Fighter, FighterAlignment, FighterTrait } from '../types';
 import { FIGHTER_NAMES, TRAITS } from '../constants';
 
 /** Roster size after the opening onboarding draft. */
-export const OPENING_DRAFT_PICKS = 5;
+export const OPENING_DRAFT_PICKS = 2;
 
 const LOW_STAT_MIN = 8;
 const LOW_STAT_MAX = 22;
@@ -25,12 +25,12 @@ export function rollLowStatFighter(alignment: FighterAlignment | 'either'): Figh
     alignment === 'either' ? (Math.random() < 0.5 ? 'Face' : 'Heel') : alignment;
 
   const stats = {
-    strength: rollLowStatValue(),
-    charisma: rollLowStatValue(),
-    stamina: rollLowStatValue(),
-    skill: rollLowStatValue(),
+    power: rollLowStatValue(),
+    mic: rollLowStatValue(),
+    endurance: rollLowStatValue(),
+    technique: rollLowStatValue(),
   };
-  const avg = (stats.strength + stats.charisma + stats.stamina + stats.skill) / 4;
+  const avg = (stats.power + stats.mic + stats.endurance + stats.technique) / 4;
 
   return {
     id: Math.random().toString(36).slice(2, 12),

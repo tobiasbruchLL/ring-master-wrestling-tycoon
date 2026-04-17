@@ -1,5 +1,22 @@
 import type { ActiveRecruit, Fighter, FighterStats, RecruitTrainingChoice } from '../types';
 
+/** Training days required before a rookie can debut to the roster. */
+export const RECRUIT_TRAINING_DAYS_TOTAL = 10;
+
+/** Subtracted from each stat when a prospect skips camp (per stat floor). */
+export const INSTANT_RECRUIT_SIGN_STAT_PENALTY = 10;
+export const INSTANT_RECRUIT_SIGN_STAT_FLOOR = 8;
+
+export function statsAfterInstantSignPenalty(stats: FighterStats): FighterStats {
+  const clip = (v: number) => Math.max(INSTANT_RECRUIT_SIGN_STAT_FLOOR, v - INSTANT_RECRUIT_SIGN_STAT_PENALTY);
+  return {
+    power: clip(stats.power),
+    technique: clip(stats.technique),
+    endurance: clip(stats.endurance),
+    mic: clip(stats.mic),
+  };
+}
+
 export const RECRUIT_TRAINING_LOW_ENERGY_THRESHOLD = 40;
 export const RECRUIT_TRAINING_INJURY_ROLL = 0.42;
 export const RECRUIT_TRAINING_INJURY_CHANCE_PERCENT = Math.round(RECRUIT_TRAINING_INJURY_ROLL * 100);
@@ -7,7 +24,7 @@ export const RECRUIT_TRAINING_INJURY_CHANCE_PERCENT = Math.round(RECRUIT_TRAININ
 /** Show extra risk copy when mishap chance for a stat day exceeds this (percent points). */
 export const RECRUIT_TRAINING_HIGH_MISHAP_WARNING_OVER_PERCENT = 30;
 
-const STAT_KEYS: (keyof FighterStats)[] = ['strength', 'charisma', 'stamina', 'skill'];
+const STAT_KEYS: (keyof FighterStats)[] = ['power', 'technique', 'endurance', 'mic'];
 
 function mentorStatFor(mentor: Fighter | undefined, key: keyof FighterStats): number {
   return mentor?.stats[key] ?? 42;

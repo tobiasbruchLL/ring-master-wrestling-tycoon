@@ -1,19 +1,23 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Match, Fighter, SimulatedMatchOutcomeDetail } from '../types';
+import { Match, Fighter, SimulatedMatchOutcomeDetail, Show } from '../types';
 import { cn } from '../lib/utils';
 import MatchOutcomeModal from '../components/MatchOutcomeModal';
 
 interface MatchSimulationProps {
   matches: Match[];
   roster: Fighter[];
+  /** Pre-show history (same snapshot used when the card was simulated). */
+  showHistory: Show[];
   perMatchOutcomes: SimulatedMatchOutcomeDetail[];
-  onComplete: () => void;
+  /** One entry per match: winner's remaining HP (1–100) from the fight bars. */
+  onComplete: (winnerHpPercents: number[]) => void;
 }
 
 export default function MatchSimulation({
   matches,
   roster,
+  showHistory,
   perMatchOutcomes,
   onComplete,
 }: MatchSimulationProps) {
@@ -24,6 +28,7 @@ export default function MatchSimulation({
   const [isHitting, setIsHitting] = useState<'A' | 'B' | null>(null);
   const [dialogue, setDialogue] = useState<{ side: 'A' | 'B', text: string } | null>(null);
   const [showOutcome, setShowOutcome] = useState(false);
+  const winnerHpByMatchRef = useRef<number[]>([]);
 
   const currentMatch = matches[currentMatchIndex];
   const fighterA = roster.find(f => f.id === currentMatch.fighterAId)!;
@@ -32,6 +37,15 @@ export default function MatchSimulation({
   const plannedWinnerId = matchOutcome?.match.winnerId;
   const loserSide: 'A' | 'B' | null =
     plannedWinnerId === fighterA.id ? 'B' : plannedWinnerId === fighterB.id ? 'A' : null;
+
+  useEffect(() => {
+    winnerHpByMatchRef.current = new Array(matches.length);
+  }, [matches.length]);
+
+  const winnerHpFromFightForModal =
+    showOutcome && plannedWinnerId
+      ? Math.max(1, Math.min(100, plannedWinnerId === fighterA.id ? healthA : healthB))
+      : null;
 
   const trashTalkLines = {
     Face: [
@@ -77,6 +91,9 @@ export default function MatchSimulation({
     }
 
     if (phase === 'fighting') {
+      const avgTec = (fighterA.stats.technique + fighterB.stats.technique) / 2;
+      const tickMs = Math.max(340, Math.min(720, Math.round(700 - avgTec * 3.15)));
+
       const interval = setInterval(() => {
         let attacker: 'A' | 'B';
         if (loserSide && Math.random() < 0.82) {
@@ -87,7 +104,10 @@ export default function MatchSimulation({
 
         const hitsLoser =
           (loserSide === 'A' && attacker === 'B') || (loserSide === 'B' && attacker === 'A');
-        const damage = Math.floor(Math.random() * 14) + (hitsLoser && loserSide ? 9 : 5);
+        const attackerFighter = attacker === 'A' ? fighterA : fighterB;
+        const pow = attackerFighter.stats.power;
+        const damage =
+          Math.floor(Math.random() * 9) + Math.round(pow * 0.11) + (hitsLoser && loserSide ? 9 : 4);
 
         setIsHitting(attacker);
         setTimeout(() => setIsHitting(null), 100);
@@ -97,11 +117,11 @@ export default function MatchSimulation({
         } else {
           setHealthA((prev) => Math.max(0, prev - damage));
         }
-      }, 600);
+      }, tickMs);
 
       return () => clearInterval(interval);
     }
-  }, [phase, loserSide]);
+  }, [phase, loserSide, fighterA, fighterB]);
 
   useEffect(() => {
     if (phase !== 'fighting') return;
@@ -112,6 +132,11 @@ export default function MatchSimulation({
   }, [healthA, healthB, phase]);
 
   const handleOutcomeContinue = () => {
+    if (plannedWinnerId) {
+      const raw = plannedWinnerId === fighterA.id ? healthA : healthB;
+      winnerHpByMatchRef.current[currentMatchIndex] = Math.max(1, Math.min(100, raw));
+    }
+
     setShowOutcome(false);
     if (currentMatchIndex < matches.length - 1) {
       setCurrentMatchIndex((i) => i + 1);
@@ -120,7 +145,8 @@ export default function MatchSimulation({
       setPhase('intro');
       setDialogue(null);
     } else {
-      onComplete();
+      const list = matches.map((_, i) => winnerHpByMatchRef.current[i] ?? perMatchOutcomes[i]?.match.winnerHpPercent ?? 50);
+      onComplete(list);
     }
   };
 
@@ -275,6 +301,11 @@ export default function MatchSimulation({
         matchNumber={currentMatchIndex + 1}
         matchTotal={matches.length}
         onContinue={handleOutcomeContinue}
+        winnerHpFromFight={winnerHpFromFightForModal}
+        fighterAFull={fighterA}
+        fighterBFull={fighterB}
+        roster={roster}
+        showHistory={showHistory}
       />
     </div>
   );
