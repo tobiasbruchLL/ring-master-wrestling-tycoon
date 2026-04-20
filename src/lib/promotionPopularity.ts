@@ -16,8 +16,7 @@ export function showScoreFromRating(rating: number): number {
 }
 
 /**
- * Map mean match score (uncapped) onto the internal 1–5 show-quality band used for
- * promotion expectation (`computePromotionPopularityDelta`).
+ * Map mean match score (uncapped) onto the internal 1–5 show-quality band (e.g. blended `Show.rating`).
  */
 export function showQualityRatingFromAverageMatchScore(avg: number): number {
   if (!Number.isFinite(avg) || avg <= 0) return 1;
@@ -43,17 +42,24 @@ const LOSS_PER_RATING_POINT = 0.045;
 const LOSS_FLOOR = 0.22;
 
 /**
- * Compare match-driven show quality (1–5, same mapping as `showQualityRatingFromAverageMatchScore`)
- * to the fan expectation implied by `getExpectedAverageMatchScore` for popularity going into the show.
- * Returns fractional progress toward the next tier (1.0 = one full level); losses are smaller than gains.
+ * Maps raw score surplus into the same "diff" scale the gain/loss curve was tuned for when it compared
+ * 1–5 quality bands (~1 unit ≈ one major step in fan perception).
+ */
+const COMBINED_SCORE_SURPLUS_PER_QUALITY_UNIT = 100;
+
+/**
+ * Promotion pop gain/loss from **combined show score** (sum of final match scores) vs **expected mean
+ * match score** for your popularity tier (`getExpectedAverageMatchScore`). The expectation does not scale
+ * with card length; longer cards raise the combined total directly.
  */
 export function computePromotionPopularityDelta(
-  showQualityFromMatches: number,
+  combinedMatchScoreTotal: number,
   promotionPopularityBeforeShow: number,
 ): { delta: number; expectedAverageMatchScore: number } {
   const expectedAverageMatchScore = getExpectedAverageMatchScore(promotionPopularityBeforeShow);
-  const expectedQuality = showQualityRatingFromAverageMatchScore(expectedAverageMatchScore);
-  const diff = showQualityFromMatches - expectedQuality;
+  const surplus =
+    (Number.isFinite(combinedMatchScoreTotal) ? combinedMatchScoreTotal : 0) - expectedAverageMatchScore;
+  const diff = surplus / COMBINED_SCORE_SURPLUS_PER_QUALITY_UNIT;
   const eps = 0.004;
 
   if (diff > eps) {

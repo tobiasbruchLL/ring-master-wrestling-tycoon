@@ -5,7 +5,9 @@ import { GameState, Match, Fighter, Show } from '../types';
 import { cn, formatCurrency, formatNumber, fighterOverallRating } from '../lib/utils';
 import {
   averageCardExcitement,
+  computeExpectedTicketSalesTotal,
   effectiveTicketUnitPrice,
+  expectedTicketDemandFromHype,
   matchSetupCostAtIndex,
   maxMatchesForVenue,
 } from '../lib/showEconomy';
@@ -214,7 +216,7 @@ function PlannerTicketSalesBreakdownModal({
             id="planner-ticket-sales-info-title"
             className="text-left font-display text-sm uppercase leading-tight tracking-wide text-white"
           >
-            Expected ticket sales · Match {matchNumber}
+            Hype · Match {matchNumber}
           </h3>
           <button
             type="button"
@@ -258,9 +260,17 @@ function PlannerTicketSalesBreakdownModal({
               <span className="shrink-0 tabular-nums">×{m.value}</span>
             </div>
           ))}
-          <div className="flex justify-between gap-3 border-t border-border pt-2 text-xs font-display uppercase tracking-[2px] text-accent">
-            <span>Expected ticket sales</span>
-            <span className="font-bold tabular-nums">{formatNumber(breakdown.totalScore)}</span>
+          <div className="space-y-2 border-t border-border pt-2">
+            <div className="flex justify-between gap-3 text-xs font-display uppercase tracking-[2px] text-accent">
+              <span>Hype</span>
+              <span className="font-bold tabular-nums">{formatNumber(breakdown.totalScore)}</span>
+            </div>
+            <div className="flex justify-between gap-3 text-[11px] font-display uppercase tracking-[2px] text-gold">
+              <span>Expected ticket sales</span>
+              <span className="font-bold tabular-nums">
+                {formatNumber(expectedTicketDemandFromHype(breakdown.totalScore))}
+              </span>
+            </div>
           </div>
         </div>
       </motion.div>
@@ -389,11 +399,12 @@ export default function ShowPlanner({ state, onScheduleShow, onCancel, onToast }
     matches.every((m) => m.fighterAId && m.fighterBId) &&
     canAfford &&
     !hasRecoveringOnCard;
-  const totalExpectedTicketSalesPreview = matches.reduce((sum, m) => {
-    if (!m.fighterAId || !m.fighterBId) return sum;
-    const breakdown = computeTicketSalesMatchupBreakdown(m, state.roster, state.history, state.popularity);
-    return breakdown ? sum + breakdown.totalScore : sum;
-  }, 0);
+  const totalExpectedTicketSalesPreview = computeExpectedTicketSalesTotal(
+    matches,
+    state.roster,
+    state.history,
+    state.popularity,
+  );
   const expectedTicketUnitPrice = effectiveTicketUnitPrice(
     selectedVenue,
     averageCardExcitement(matches, state.roster, state.history, state.popularity),
@@ -539,13 +550,15 @@ export default function ShowPlanner({ state, onScheduleShow, onCancel, onToast }
                       <div className="flex items-center justify-between gap-2 text-xs font-display uppercase tracking-[2px] text-accent">
                         <span>Expected ticket sales</span>
                         <div className="flex shrink-0 items-center gap-1.5">
-                          <span className="font-bold tabular-nums">{formatNumber(breakdown.totalScore)}</span>
+                          <span className="font-bold tabular-nums">
+                            {formatNumber(expectedTicketDemandFromHype(breakdown.totalScore))}
+                          </span>
                           <button
                             type="button"
                             onClick={() => setTicketSalesInfoIdx(idx)}
                             aria-haspopup="dialog"
                             aria-expanded={ticketSalesInfoIdx === idx}
-                            aria-label="How expected ticket sales are calculated"
+                            aria-label="How hype and expected ticket sales are calculated"
                             className="inline-flex size-8 items-center justify-center rounded-full border border-border text-zinc-400 transition-colors hover:border-accent hover:text-accent"
                           >
                             <Info className="size-[1.05rem]" strokeWidth={1.75} />

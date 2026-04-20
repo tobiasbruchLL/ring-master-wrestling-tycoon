@@ -8,15 +8,34 @@ interface ShowResultModalProps {
   show: Show;
 }
 
+/** Sum of final match scores for the card (UI); falls back to mean × count for older saves without per-match scores. */
+function combinedMatchScoreTotal(show: Show): number {
+  const n = show.matches.length;
+  if (n === 0) {
+    return Math.max(0, Math.round((show.rating - 1.4) * 120));
+  }
+  const allHaveMatchScore = show.matches.every((m) => typeof m.matchScore === 'number');
+  if (allHaveMatchScore) {
+    return Math.round(show.matches.reduce((acc, m) => acc + (m.matchScore as number), 0));
+  }
+  if (show.averageMatchScore !== undefined) {
+    return Math.round(show.averageMatchScore * n);
+  }
+  return Math.max(0, Math.round((show.rating - 1.4) * 120 * n));
+}
+
+/**
+ * Fan expectation is still **per-match mean** (popularity tier table). Actual score is combined match
+ * scores, so bigger cards can clear the same bar and earn more popularity.
+ */
+function expectedAverageMatchScoreDisplay(show: Show): number | null {
+  if (show.expectedAverageMatchScore === undefined) return null;
+  return Math.round(show.expectedAverageMatchScore);
+}
+
 export default function ShowResultModal({ isOpen, onClose, show }: ShowResultModalProps) {
-  const showScore =
-    show.averageMatchScore !== undefined
-      ? Math.round(show.averageMatchScore)
-      : Math.max(0, Math.round((show.rating - 1.4) * 120));
-  const expectedScore =
-    show.expectedAverageMatchScore !== undefined
-      ? Math.round(show.expectedAverageMatchScore)
-      : null;
+  const showScore = combinedMatchScoreTotal(show);
+  const expectedScore = expectedAverageMatchScoreDisplay(show);
   const popDelta = show.popularityGain;
   const popLabel = (() => {
     if (popDelta === 0) return '±0';

@@ -63,15 +63,17 @@ import {
 import { computeShowPrepDays } from '../lib/showScheduling';
 import {
   computeMatchScoreBreakdown,
-  computeTicketSalesMatchupBreakdown,
   popularityGainFromMatchScore,
   resolveMatchScore,
-  rollWinnerEndingHpPercent,
   type MatchScoreBreakdown,
 } from '../lib/matchScoring';
-import { matchSetupCostAtIndex } from '../lib/showEconomy';
+import { simulateMatchFightStats } from '../lib/statMatchFight';
+import {
+  computeExpectedTicketSalesTotal,
+  computeNightTicketSale,
+  matchSetupCostAtIndex,
+} from '../lib/showEconomy';
 import { OPENING_DRAFT_PICKS } from '../lib/draftRoster';
-import { computeNightTicketSale } from '../lib/showEconomy';
 import { dailyEnergyRecoveryBonus, sponsorShowCompletionBonus } from '../lib/facilityBonuses';
 import { getNextLeagueTier, maxLeagueIndex } from '../lib/leagues';
 import { rollShowFightEnergyCost, showFightInjuryChance } from '../lib/fighterShow';
@@ -250,18 +252,6 @@ function normalizeActiveRecruits(raw: unknown): ActiveRecruit[] {
 /** Legacy recruits used a " Jr" name suffix; strip it for display and new saves. */
 function stripRecruitJrNameSuffix(name: string): string {
   return name.replace(/\s+Jr$/i, '') || name;
-}
-
-function computeExpectedTicketSalesTotal(
-  matches: Match[],
-  roster: Fighter[],
-  history: Show[],
-  promotionPopularity: number,
-): number {
-  return matches.reduce((sum, match) => {
-    const breakdown = computeTicketSalesMatchupBreakdown(match, roster, history, promotionPopularity);
-    return breakdown ? sum + breakdown.totalScore : sum;
-  }, 0);
 }
 
 /** Map legacy `expectedShowRating` (1–5 band) onto `expectedAverageMatchScore` when loading saves. */
@@ -445,13 +435,14 @@ export function applyWinnerHpOverridesToShowSimulation(
     return { ...base, winnerHpPercent: hp, matchScore };
   });
 
+  const combinedMatchScore = updatedMatches.reduce((acc, m) => acc + (m.matchScore ?? 0), 0);
   const avgMatchScore =
-    updatedMatches.reduce((acc, m) => acc + (m.matchScore || 0), 0) / updatedMatches.length;
+    updatedMatches.length > 0 ? combinedMatchScore / updatedMatches.length : 0;
   const productionRating = BASE_PRODUCTION_RATING;
   const innerQuality = showQualityRatingFromAverageMatchScore(avgMatchScore);
   const showRating = Math.min(5, Math.max(1, (innerQuality + productionRating) / 2));
   const { delta: popularityGain, expectedAverageMatchScore } = computePromotionPopularityDelta(
-    innerQuality,
+    combinedMatchScore,
     prevBeforeShow.popularity,
   );
   const nextPromotionPopularity = clampPromotionPopularity(prevBeforeShow.popularity + popularityGain);
@@ -534,20 +525,19 @@ function computeShowSimulation(
     const breakdown = calculateMatchScore(match, roster, history);
     const fighterA = roster.find((f) => f.id === match.fighterAId)!;
     const fighterB = roster.find((f) => f.id === match.fighterBId)!;
+    const { winnerId, winnerHpPercent } = simulateMatchFightStats(fighterA, fighterB);
     if (!breakdown) {
-      const winnerId = Math.random() > 0.5 ? fighterA.id : fighterB.id;
-      return { ...match, matchScore: 0, winnerId, winnerHpPercent: 50 };
+      return { ...match, matchScore: 0, winnerId, winnerHpPercent };
     }
-    const winnerId = Math.random() > 0.5 ? fighterA.id : fighterB.id;
-    const winnerHpPercent = rollWinnerEndingHpPercent();
     const matchupTotalScore = Math.floor(breakdown.totalScore);
     const matchScore = resolveMatchScore(matchupTotalScore, winnerHpPercent);
 
     return { ...match, winnerId, matchScore, winnerHpPercent, matchupTotalScore };
   });
 
+  const combinedMatchScore = simulatedMatches.reduce((acc, m) => acc + (m.matchScore ?? 0), 0);
   const avgMatchScore =
-    simulatedMatches.reduce((acc, m) => acc + (m.matchScore || 0), 0) / simulatedMatches.length;
+    simulatedMatches.length > 0 ? combinedMatchScore / simulatedMatches.length : 0;
 
   const productionRating = BASE_PRODUCTION_RATING;
   const innerQuality = showQualityRatingFromAverageMatchScore(avgMatchScore);
@@ -577,9 +567,9 @@ function computeShowSimulation(
   const setupCost = matches.reduce((acc, _, idx) => acc + matchSetupCostAtIndex(venueId, idx), 0);
   const totalCost = venue.cost + setupCost;
 
-  /** Match-driven quality; compared to tier-based expected mean score so the modal matches popularity math. */
+  /** Promotion pop: combined match scores vs tier expected mean (same bar any card length). */
   const { delta: popularityGain, expectedAverageMatchScore } = computePromotionPopularityDelta(
-    innerQuality,
+    combinedMatchScore,
     prev.popularity,
   );
   const nextPromotionPopularity = clampPromotionPopularity(prev.popularity + popularityGain);

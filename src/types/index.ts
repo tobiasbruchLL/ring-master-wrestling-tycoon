@@ -106,7 +106,7 @@ export type Show = {
   attendance: number;
   /** Blended 1–5 show quality for promotion expectation math (derived from match scores). */
   rating: number;
-  /** Mean `matchScore` across the card; primary display score for the show. */
+  /** Mean `matchScore` across the card (popularity / quality math); show result UI uses sum of match scores. */
   averageMatchScore?: number;
   /** Change applied to `GameState.popularity` for this show (fractional = bar fill toward next tier). */
   popularityGain: number;

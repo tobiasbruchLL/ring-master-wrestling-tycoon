@@ -38,7 +38,7 @@ export function rollLowStatFighter(alignment: FighterAlignment | 'either'): Figh
     stats,
     salary: 0,
     signingBonus: 0,
-    popularity: Math.min(12, Math.max(3, Math.floor(4 + avg * 0.25 + Math.random() * 3))),
+    popularity: Math.min(120, Math.max(30, Math.floor(40 + avg * 2.5 + Math.random() * 30))),
     energy: 100,
     alignment: resolved,
     trait: rollTrait(),

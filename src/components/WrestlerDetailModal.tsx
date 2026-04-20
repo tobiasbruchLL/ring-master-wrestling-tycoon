@@ -16,11 +16,13 @@ function StatRow({
   value,
   icon,
   iconClass,
+  hint,
 }: {
   label: string;
   value: number;
   icon: ReactNode;
   iconClass: string;
+  hint: string;
 }) {
   const pct = Math.min(100, Math.max(0, value));
   return (
@@ -40,6 +42,7 @@ function StatRow({
           className="h-full bg-accent"
         />
       </div>
+      <p className="text-[10px] leading-snug text-zinc-500 pl-[22px]">{hint}</p>
     </div>
   );
 }
@@ -145,24 +148,28 @@ function WrestlerDetailBody({
                     value={fighter.stats.power}
                     icon={<Dumbbell size={14} />}
                     iconClass="text-red-400"
+                    hint="Adds damage on each strike in the fight sim."
                   />
                   <StatRow
                     label="⚡ Technique · TEC"
                     value={fighter.stats.technique}
                     icon={<Crosshair size={14} />}
                     iconClass="text-cyan-400"
+                    hint="Faster in-ring pace; higher average technique in the match lowers injury risk."
                   />
                   <StatRow
                     label="🛡️ Endurance · END"
                     value={fighter.stats.endurance}
                     icon={<HeartPulse size={14} />}
                     iconClass="text-emerald-400"
+                    hint="Lose less energy after a booked match."
                   />
                   <StatRow
                     label="🎤 Mic work · MIC"
                     value={fighter.stats.mic}
                     icon={<Mic2 size={14} />}
                     iconClass="text-purple-400"
+                    hint="Bigger popularity bumps from a strong match score (not counted in OVR)."
                   />
                 </div>
               </div>

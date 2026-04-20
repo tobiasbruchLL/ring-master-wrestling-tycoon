@@ -1,7 +1,6 @@
 import { Fighter, Match, Show } from '../types';
 import { DEBUT_MATCH_MULTIPLIER } from '../constants';
 import { fighterOverallRating } from './utils';
-import { randomIntInclusive } from './fighterShow';
 
 export type MatchScoreAdditive = { label: string; amount: number };
 
@@ -9,7 +8,7 @@ export type MatchScoreBasis = 'ticket_sales' | 'in_ring_quality';
 
 /**
  * Line-item breakdown for either:
- * - **Ticket matchup** (`ticket_sales`): popularity draw + all booking buzz (incl. heel/face, evenly matched).
+ * - **Ticket matchup** (`ticket_sales`): popularity draw + all booking buzz (incl. heel/face, evenly matched by OVR).
  * - **Match score base** (`in_ring_quality`): combined OVR + in-ring style multipliers only — heel/face and evenly matched do **not** apply here (those affect ticket sales only).
  */
 export type MatchScoreBreakdown = {
@@ -37,20 +36,8 @@ export type MatchFinishBreakdown = {
 const CLOSE_HP_MAX = 25;
 const ONE_SIDED_HP_MIN = 85;
 
+/** Max |OVR A − OVR B| for evenly-matched buzz on ticket draw (same band as in-ring evenness concept). */
 const EVENLY_MATCHED_OVR_DIFF_MAX = 11;
-/** Popularity values are small integers; closeness uses a tighter band than OVR. */
-const EVENLY_MATCHED_POP_DIFF_MAX = 2;
-
-/**
- * Roll winner ending HP (1–100). Biased toward decisive finishes so finish multipliers matter.
- */
-export function rollWinnerEndingHpPercent(): number {
-  const r = Math.random();
-  if (r < 0.08) return 100;
-  if (r < 0.32) return randomIntInclusive(1, CLOSE_HP_MAX);
-  if (r < 0.55) return randomIntInclusive(ONE_SIDED_HP_MIN, 99);
-  return randomIntInclusive(CLOSE_HP_MAX + 1, ONE_SIDED_HP_MIN - 1);
-}
 
 export function computeWinnerFinishMultiplier(winnerHpPercent: number): MatchFinishBreakdown {
   const hp = Math.max(1, Math.min(100, Math.round(winnerHpPercent)));
@@ -65,8 +52,8 @@ export function computeWinnerFinishMultiplier(winnerHpPercent: number): MatchFin
     return { winnerHpPercent: hp, finishMultipliers, finishMultiplier: 1.5 };
   }
   if (hp >= ONE_SIDED_HP_MIN) {
-    finishMultipliers.push({ label: 'One-sided', value: 0.5 });
-    return { winnerHpPercent: hp, finishMultipliers, finishMultiplier: 0.5 };
+    finishMultipliers.push({ label: 'One-sided', value: 0.8 });
+    return { winnerHpPercent: hp, finishMultipliers, finishMultiplier: 0.8 };
   }
 
   finishMultipliers.push({ label: 'Competitive', value: 1 });
@@ -90,10 +77,11 @@ export function popularityGainFromMatchScore(
   fighter: Fighter,
   won: boolean,
 ): number {
+  const fromScore = Math.floor(matchScore / 10);
   const micScale = 0.45 + (fighter.stats.mic / 100) * 0.8;
   const base = Math.max(1, Math.round((matchScore / 52) * micScale));
   const factor = won ? 1.18 : 0.75;
-  return Math.max(1, Math.round(base * factor));
+  return Math.max(1, Math.round(base * factor) + fromScore);
 }
 
 function bookingMultipliersForPair(
@@ -193,7 +181,7 @@ export function computeTicketSalesMatchupBreakdown(
     typeof promotionPopularity === 'number' && Number.isFinite(promotionPopularity);
   const promotionDraw = applyPromotionToTicketBase ? Math.max(0, Math.floor(promotionPopularity)) : 0;
   const matchupBaseBeforeMultipliers = combinedWrestlerPopularity + promotionDraw;
-  const evennessDiff = Math.abs(pa - pb);
+  const evennessDiff = Math.abs(overallRatingA - overallRatingB);
 
   const core = bookingMultipliersForPair(
     fighterA,
@@ -203,7 +191,7 @@ export function computeTicketSalesMatchupBreakdown(
     matchupBaseBeforeMultipliers,
     'ticket_sales',
     evennessDiff,
-    EVENLY_MATCHED_POP_DIFF_MAX,
+    EVENLY_MATCHED_OVR_DIFF_MAX,
     history,
     true,
   );
@@ -228,7 +216,7 @@ export type MatchScoreCalculationSheet = {
   matchupTotalUsed: number;
   /** Combined OVR + in-ring-only multipliers; null when roster/history were not supplied. */
   preFinishBreakdown: MatchScoreBreakdown | null;
-  /** Popularity-draw matchup including heel/face and evenly matched — **ticket sales only**; null when roster/history omitted. */
+  /** Popularity-draw matchup including heel/face and OVR-evenly-matched buzz — **ticket sales only**; null when roster/history omitted. */
   ticketSalesBreakdown: MatchScoreBreakdown | null;
   finish: MatchFinishBreakdown;
   /** `matchupTotalUsed * finish.finishMultiplier` before flooring. */

@@ -1,7 +1,11 @@
 import { GameState } from '../types';
 import { VENUES } from '../constants';
 import { cn, formatCurrency, formatNumber } from '../lib/utils';
-import { averageCardExcitement, effectiveTicketUnitPrice } from '../lib/showEconomy';
+import {
+  averageCardExcitement,
+  computeExpectedTicketSalesTotal,
+  effectiveTicketUnitPrice,
+} from '../lib/showEconomy';
 import { Calendar } from 'lucide-react';
 
 interface DashboardProps {
@@ -21,7 +25,10 @@ export default function Dashboard({ state }: DashboardProps) {
     plan && venue ? effectiveTicketUnitPrice(venue, excitement, state.ticketPriceUpgrades) : 0;
   const ticketIncomeSoFar = plan ? (plan.advanceTicketRevenueTotal ?? 0) : 0;
   const ticketsSoFar = plan ? (plan.ticketsSoldTotal ?? 0) : 0;
-  const expectedTicketSalesTotal = plan ? (plan.expectedTicketSalesTotal ?? Math.round(excitement)) : 0;
+  const expectedTicketSalesTotal = plan
+    ? (plan.expectedTicketSalesTotal ??
+        computeExpectedTicketSalesTotal(plan.matches, state.roster, state.history, state.popularity))
+    : 0;
   const audienceCap = venue?.maxAudience ?? 0;
   const audienceCount = ticketsSoFar;
   const audienceFillPct = audienceCap > 0 ? Math.min(100, (audienceCount / audienceCap) * 100) : 0;

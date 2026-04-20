@@ -35,8 +35,21 @@ export default function MatchSimulation({
   const fighterB = roster.find(f => f.id === currentMatch.fighterBId)!;
   const matchOutcome = perMatchOutcomes[currentMatchIndex];
   const plannedWinnerId = matchOutcome?.match.winnerId;
+  const plannedWinnerHp = matchOutcome?.match.winnerHpPercent;
   const loserSide: 'A' | 'B' | null =
     plannedWinnerId === fighterA.id ? 'B' : plannedWinnerId === fighterB.id ? 'A' : null;
+  /** Closer booked finishes trade more; dominant wins keep heavier winner-side offense. */
+  const winnerHitBias =
+    typeof plannedWinnerHp === 'number' &&
+    Number.isFinite(plannedWinnerHp) &&
+    plannedWinnerId &&
+    loserSide
+      ? (() => {
+          const whp = Math.max(1, Math.min(100, plannedWinnerHp));
+          const t = Math.pow((whp - 1) / 99, 0.82);
+          return 0.5 + t * 0.34;
+        })()
+      : 0.65;
 
   useEffect(() => {
     winnerHpByMatchRef.current = new Array(matches.length);
@@ -96,7 +109,7 @@ export default function MatchSimulation({
 
       const interval = setInterval(() => {
         let attacker: 'A' | 'B';
-        if (loserSide && Math.random() < 0.82) {
+        if (loserSide && Math.random() < winnerHitBias) {
           attacker = loserSide === 'A' ? 'B' : 'A';
         } else {
           attacker = Math.random() > 0.5 ? 'A' : 'B';
@@ -105,9 +118,14 @@ export default function MatchSimulation({
         const hitsLoser =
           (loserSide === 'A' && attacker === 'B') || (loserSide === 'B' && attacker === 'A');
         const attackerFighter = attacker === 'A' ? fighterA : fighterB;
+        const defenderFighter = attacker === 'A' ? fighterB : fighterA;
         const pow = attackerFighter.stats.power;
-        const damage =
-          Math.floor(Math.random() * 9) + Math.round(pow * 0.11) + (hitsLoser && loserSide ? 9 : 4);
+        const endMit = 1 - Math.min(0.35, defenderFighter.stats.endurance * 0.0025);
+        const raw =
+          Math.floor(Math.random() * 9) +
+          Math.round(pow * 0.11) +
+          (hitsLoser && loserSide ? 9 : 4);
+        const damage = Math.max(1, Math.round(raw * endMit));
 
         setIsHitting(attacker);
         setTimeout(() => setIsHitting(null), 100);
@@ -121,7 +139,7 @@ export default function MatchSimulation({
 
       return () => clearInterval(interval);
     }
-  }, [phase, loserSide, fighterA, fighterB]);
+  }, [phase, loserSide, fighterA, fighterB, winnerHitBias]);
 
   useEffect(() => {
     if (phase !== 'fighting') return;

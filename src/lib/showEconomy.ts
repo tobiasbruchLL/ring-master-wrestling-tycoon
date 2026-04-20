@@ -2,6 +2,7 @@ import { GameState, Match, PlannedShow, Show, Venue } from '../types';
 import { VENUES } from '../constants';
 import { computeTicketSalesMatchupBreakdown } from './matchScoring';
 import { merchGateMultiplier } from './facilityBonuses';
+import { HQ_TICKET_PRICE_START } from './ticketPriceUpgrade';
 
 function venueById(venueId: string): Venue {
   return VENUES.find((v) => v.id === venueId) ?? VENUES[0];
@@ -43,18 +44,43 @@ export function venueAudienceCap(venueId: string): number {
   return venueById(venueId).maxAudience;
 }
 
-/** Per-ticket price for this venue, card buzz, and HQ ticket upgrades (whole dollars). */
+/**
+ * Gate price per ticket (whole dollars): flat {@link HQ_TICKET_PRICE_START} plus +$1 per HQ ticket upgrade.
+ * Card hype and venue `baseTicketPrice` do not change gate math (venue scale is demand/capacity elsewhere).
+ */
 export function effectiveTicketUnitPrice(
-  venue: Venue,
-  excitement: number,
+  _venue: Venue,
+  _excitement: number,
   ticketPriceUpgrades = 0,
 ): number {
-  const buzzAddon = Math.min(24, Math.floor(excitement / 52));
   const hq = Math.max(0, Math.floor(ticketPriceUpgrades));
-  return Math.max(4, venue.baseTicketPrice + buzzAddon + hq);
+  return HQ_TICKET_PRICE_START + hq;
 }
 
-/** Average ticket-buzz matchup `totalScore` across booked matches that have both wrestlers. */
+/**
+ * Expected ticket demand for one match from ticket-sales hype (`totalScore` on the ticket breakdown).
+ * Matches planner UI: `floor(hype / 10)`.
+ */
+export function expectedTicketDemandFromHype(totalScore: number): number {
+  return Math.max(0, Math.floor(totalScore / 10));
+}
+
+/** Sum of per-match {@link expectedTicketDemandFromHype} — stored on `upcomingShow.expectedTicketSalesTotal`. */
+export function computeExpectedTicketSalesTotal(
+  matches: Match[],
+  roster: GameState['roster'],
+  history: Show[],
+  promotionPopularity: number,
+): number {
+  let sum = 0;
+  for (const m of matches) {
+    const b = computeTicketSalesMatchupBreakdown(m, roster, history, promotionPopularity);
+    if (b) sum += expectedTicketDemandFromHype(b.totalScore);
+  }
+  return sum;
+}
+
+/** Average ticket-sales hype (`totalScore`) per match — used when inferring demand if `expectedTicketSalesTotal` is missing. */
 export function averageCardExcitement(
   matches: Match[],
   roster: GameState['roster'],
@@ -102,11 +128,10 @@ export function computeNightTicketSale(
   ticketPriceUpgrades = 0,
 ): { tickets: number; income: number; pricePerTicket: number } {
   const venue = venueById(plan.venueId);
-  const excitement = averageCardExcitement(plan.matches, roster, history, popularity);
   const cap = venue.maxAudience;
   const sold = plan.ticketsSoldTotal ?? 0;
   const remaining = Math.max(0, cap - sold);
-  const pricePerTicket = effectiveTicketUnitPrice(venue, excitement, ticketPriceUpgrades);
+  const pricePerTicket = effectiveTicketUnitPrice(venue, 0, ticketPriceUpgrades);
 
   if (remaining === 0) {
     return { tickets: 0, income: 0, pricePerTicket };
@@ -116,7 +141,15 @@ export function computeNightTicketSale(
   const expectedTotal =
     typeof plan.expectedTicketSalesTotal === 'number'
       ? Math.max(0, plan.expectedTicketSalesTotal)
-      : Math.max(0, Math.floor((18 + popularity * 4.5 + excitement * 0.38) * venue.multiplier));
+      : Math.max(
+          0,
+          Math.floor(
+            (18 +
+              popularity * 4.5 +
+              averageCardExcitement(plan.matches, roster, history, popularity) * 0.38) *
+              venue.multiplier,
+          ),
+        );
   const perDayExpectedSales = expectedTotal / prepDays;
   const demand = Math.floor(perDayExpectedSales * (0.9 + Math.random() * 0.3));
   const tickets = Math.min(remaining, Math.max(0, demand));

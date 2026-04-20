@@ -1,5 +1,6 @@
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { UPGRADE_PURCHASE_COST_MULTIPLIER } from '../constants';
 import { facilityMaxLevel } from './facilityCaps';
 import type { Facility, FighterStats } from '../types';
 
@@ -44,9 +45,17 @@ export function getFacilityUpgradeCost(facility: {
   const mult = facility.upgradeCostMultiplier ?? DEFAULT_FACILITY_UPGRADE_MULT;
   const firstDiscount = facility.firstUpgradeDiscount ?? 0;
   if (facility.level === 0) {
-    return Math.max(1, Math.floor(facility.baseCost - firstDiscount));
+    return Math.max(
+      1,
+      Math.floor((facility.baseCost - firstDiscount) * UPGRADE_PURCHASE_COST_MULTIPLIER),
+    );
   }
-  return Math.floor(facility.baseCost * Math.pow(mult, facility.level - 1));
+  return Math.max(
+    1,
+    Math.floor(
+      facility.baseCost * Math.pow(mult, facility.level - 1) * UPGRADE_PURCHASE_COST_MULTIPLIER,
+    ),
+  );
 }
 
 export function hasAffordableFacilityUpgrade(state: {

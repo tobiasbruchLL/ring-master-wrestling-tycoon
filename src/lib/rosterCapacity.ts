@@ -1,3 +1,4 @@
+import { UPGRADE_PURCHASE_COST_MULTIPLIER } from '../constants';
 import type { GameState } from '../types';
 
 /** Starting max roster before any HQ roster expansion purchases. */
@@ -27,8 +28,8 @@ export function getMaxRosterSize(state: Pick<GameState, 'leagueIndex' | 'rosterC
 /** Cost for the next roster expansion (current count = upgrades already purchased). */
 export function getRosterCapacityUpgradeCost(currentUpgradesPurchased: number): number {
   const u = Math.max(0, Math.floor(currentUpgradesPurchased));
-  if (u === 0) return UPGRADE_BASE_COST;
-  return Math.floor(UPGRADE_BASE_COST * Math.pow(UPGRADE_COST_MULT, u - 1));
+  const raw = u === 0 ? UPGRADE_BASE_COST : UPGRADE_BASE_COST * Math.pow(UPGRADE_COST_MULT, u - 1);
+  return Math.max(1, Math.floor(raw * UPGRADE_PURCHASE_COST_MULTIPLIER));
 }
 
 export function hasAffordableRosterCapacityUpgrade(state: {

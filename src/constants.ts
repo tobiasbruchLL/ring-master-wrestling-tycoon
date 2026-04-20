@@ -3,13 +3,17 @@ import { Fighter, Facility, MarketingCampaign, Venue } from './types';
 export const INITIAL_MONEY = 0;
 export const INITIAL_POPULARITY = 1;
 
+/** Multiplier on every HQ upgrade purchase (facilities, roster expansion, ticket pricing). 0.3 = 70% off nominal curves. */
+export const UPGRADE_PURCHASE_COST_MULTIPLIER = 0.3;
+
 /**
- * Mean match score fans expect at each whole promotion popularity tier (index 0 = tier 1 → 80).
+ * Mean match score fans expect at each whole promotion popularity tier (index 0 = tier 1 → 25).
+ * Kept deliberately low so beating expectations (and gaining promotion pop) stays achievable.
  * Higher tiers reuse the last value (cap).
  */
 export const EXPECTED_AVERAGE_MATCH_SCORE_BY_POPULARITY_TIER: readonly number[] = [
-  80, 95, 110, 125, 140, 155, 170, 185, 200, 215, 230, 245, 260, 275, 290, 305, 320, 335, 350, 365, 380,
-  395,
+  25, 40, 55, 70, 85, 100, 115, 130, 145, 160, 175, 190, 205, 220, 235, 250, 265, 280, 295, 310, 325,
+  340,
 ];
 
 export function expectedAverageMatchScoreForPopularityTier(tier: number): number {
@@ -70,7 +74,7 @@ export const STARTING_FIGHTERS: Fighter[] = [
     stats: { power: 28, mic: 14, endurance: 20, technique: 16 },
     salary: 0,
     signingBonus: 0,
-    popularity: 6,
+    popularity: 60,
     energy: 100,
     alignment: 'Heel',
     trait: 'Powerhouse',
@@ -84,7 +88,7 @@ export const STARTING_FIGHTERS: Fighter[] = [
     stats: { power: 14, mic: 22, endurance: 22, technique: 26 },
     salary: 0,
     signingBonus: 0,
-    popularity: 8,
+    popularity: 80,
     energy: 100,
     alignment: 'Face',
     trait: 'High Flyer',
@@ -98,7 +102,7 @@ export const STARTING_FIGHTERS: Fighter[] = [
     stats: { power: 26, mic: 20, endurance: 16, technique: 14 },
     salary: 0,
     signingBonus: 0,
-    popularity: 10,
+    popularity: 100,
     energy: 100,
     alignment: 'Face',
     trait: 'Brawler',
